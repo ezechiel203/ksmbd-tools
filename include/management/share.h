@@ -51,6 +51,8 @@ struct ksmbd_share {
 	unsigned short	force_uid;
 	unsigned short	force_gid;
 
+	unsigned long long	time_machine_max_size;
+
 	int		flags;
 	int		state;
 
@@ -115,6 +117,11 @@ enum KSMBD_SHARE_CONF {
 	KSMBD_SHARE_CONF_VFS_OBJECTS,
 	KSMBD_SHARE_CONF_WRITABLE,
 	KSMBD_SHARE_CONF_CROSSMNT			= 30,
+	KSMBD_SHARE_CONF_FRUIT_TIME_MACHINE,
+	KSMBD_SHARE_CONF_FRUIT_FINDER_INFO,
+	KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE,
+	KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS,
+	KSMBD_SHARE_CONF_TIME_MACHINE_MAX_SIZE		= 35,
 	KSMBD_SHARE_CONF_MAX
 };
 

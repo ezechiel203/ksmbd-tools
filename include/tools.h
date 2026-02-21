@@ -56,6 +56,7 @@ struct smbconf_global {
 	unsigned int		smbd_max_io_size;
 	unsigned int		max_connections;
 	unsigned int		max_ip_connections;
+	char			*fruit_model;
 	unsigned int		share_fake_fscaps;
 	unsigned int		gen_subauth[3];
 	char			*krb5_keytab_file;

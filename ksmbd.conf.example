@@ -5,6 +5,11 @@
 	bind interfaces only = no
 	deadtime = 0
 	durable handles = no
+	fruit copyfile = no
+	fruit extensions = no
+	fruit model =
+	fruit nfs aces = no
+	fruit zero fileid = no
 	guest account = nobody
 	interfaces = 
 	ipc timeout = 0
@@ -43,6 +48,10 @@
 	directory mask = 0755
 	follow symlinks = no
 	force create mode = 0000
+	fruit finder info = no
+	fruit max access = no
+	fruit rfork size = no
+	fruit time machine = no
 	force directory mode = 0000
 	force group = 
 	force user = 
@@ -55,7 +64,8 @@
 	read list = 
 	read only = ; yes
 	store dos attributes = yes
-	valid users = 
+	time machine max size = 0
+	valid users =
 	veto files = 
 	vfs objects = 
 	write list = 

@@ -560,6 +560,46 @@ static int process_global_conf_kv(GHashTable *kv)
 				KSMBD_CONF_MAX_CONNECTIONS;
 	}
 
+	if (group_kv_steal(kv, "fruit extensions", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS;
+	}
+
+	if (group_kv_steal(kv, "fruit zero fileid", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID;
+	}
+
+	if (group_kv_steal(kv, "fruit nfs aces", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES;
+	}
+
+	if (group_kv_steal(kv, "fruit copyfile", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE;
+	}
+
+	if (group_kv_steal(kv, "fruit model", &k, &v)) {
+		global_conf.fruit_model = cp_get_group_kv_string(v);
+	}
+
 	return 0;
 }
 

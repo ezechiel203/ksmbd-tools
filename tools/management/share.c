@@ -60,6 +60,11 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"vfs objects",
 	"writable",
 /*30*/	"crossmnt",
+	"fruit time machine",
+	"fruit finder info",
+	"fruit rfork size",
+	"fruit max access",
+/*35*/	"time machine max size",
 };
 
 /*
@@ -101,6 +106,11 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"",
 	"",
 /*30*/	"yes",
+	"no",
+	"no",
+	"no",
+	"no",
+/*35*/	"0",
 };
 
 static GHashTable	*shares_table;
@@ -759,6 +769,47 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			clear_share_flag(share, KSMBD_SHARE_FLAG_CROSSMNT);
 	}
 
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_FRUIT_TIME_MACHINE, &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share,
+				       KSMBD_SHARE_FLAG_FRUIT_TIME_MACHINE);
+		else
+			clear_share_flag(share,
+					 KSMBD_SHARE_FLAG_FRUIT_TIME_MACHINE);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_FRUIT_FINDER_INFO, &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share,
+				       KSMBD_SHARE_FLAG_FRUIT_FINDER_INFO);
+		else
+			clear_share_flag(share,
+					 KSMBD_SHARE_FLAG_FRUIT_FINDER_INFO);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE, &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share,
+				       KSMBD_SHARE_FLAG_FRUIT_RFORK_SIZE);
+		else
+			clear_share_flag(share,
+					 KSMBD_SHARE_FLAG_FRUIT_RFORK_SIZE);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS, &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share,
+				       KSMBD_SHARE_FLAG_FRUIT_MAX_ACCESS);
+		else
+			clear_share_flag(share,
+					 KSMBD_SHARE_FLAG_FRUIT_MAX_ACCESS);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_TIME_MACHINE_MAX_SIZE,
+			   &k, &v)) {
+		share->time_machine_max_size = cp_memparse(v);
+	}
+
 	return 0;
 }
 
@@ -933,6 +984,7 @@ int shm_handle_share_config_request(struct ksmbd_share *share,
 	resp->force_directory_mode = share->force_directory_mode;
 	resp->force_uid = share->force_uid;
 	resp->force_gid = share->force_gid;
+	resp->time_machine_max_size = share->time_machine_max_size;
 	*resp->share_name = 0x00;
 	strncat(resp->share_name, share->name, KSMBD_REQ_MAX_SHARE_NAME - 1);
 	resp->veto_list_sz = share->veto_list_sz;
