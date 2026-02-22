@@ -1,0 +1,194 @@
+#!/bin/sh
+# ksmbd-mdns-detect — Detect available mDNS backends.
+# Outputs machine-readable key=value pairs (sourceable by shell).
+# Zero side effects — safe to run anywhere.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+set -e
+
+# Resolve our own directory for sourcing the library
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Try installed path first, then local dev path
+if [ -f "/usr/lib/ksmbd/ksmbd-mdns-lib.sh" ]; then
+    . "/usr/lib/ksmbd/ksmbd-mdns-lib.sh"
+elif [ -f "$SCRIPT_DIR/ksmbd-mdns-lib.sh" ]; then
+    . "$SCRIPT_DIR/ksmbd-mdns-lib.sh"
+else
+    echo "MDNS_ERROR=library_not_found" ; exit 1
+fi
+
+# ── Check each backend ───────────────────────────────────────
+
+AVAHI_INSTALLED=0; AVAHI_RUNNING=0
+MDNSRESPONDER_INSTALLED=0; MDNSRESPONDER_RUNNING=0
+RESOLVED_INSTALLED=0; RESOLVED_RUNNING=0; RESOLVED_MDNS=0
+MDNSD_INSTALLED=0; MDNSD_RUNNING=0
+GOMDNS_INSTALLED=0; GOMDNS_RUNNING=0
+RUSTMDNS_INSTALLED=0; RUSTMDNS_RUNNING=0
+KSMBDGOMDNS_INSTALLED=0; KSMBDGOMDNS_RUNNING=0
+
+# Avahi
+if command -v avahi-daemon >/dev/null 2>&1; then
+    AVAHI_INSTALLED=1
+    is_service_running "avahi-daemon" && AVAHI_RUNNING=1
+fi
+
+# mDNSResponder / Apple mdnsd
+if command -v mDNSResponderPosix >/dev/null 2>&1 || \
+   { command -v mdnsd >/dev/null 2>&1 && \
+     command -v dns-sd >/dev/null 2>&1; }; then
+    # Distinguish Apple mdnsd from troglobit mdnsd
+    _mdnsd_path="$(command -v mdnsd 2>/dev/null)"
+    case "$_mdnsd_path" in
+        */Apple/*|*/mDNSResponder/*) MDNSRESPONDER_INSTALLED=1 ;;
+    esac
+    command -v mDNSResponderPosix >/dev/null 2>&1 && MDNSRESPONDER_INSTALLED=1
+    command -v dns-sd >/dev/null 2>&1 && MDNSRESPONDER_INSTALLED=1
+    if [ "$MDNSRESPONDER_INSTALLED" -eq 1 ]; then
+        { is_service_running "mdnsd" || is_service_running "mDNSResponder"; } && \
+            MDNSRESPONDER_RUNNING=1
+    fi
+fi
+
+# systemd-resolved
+if command -v resolvectl >/dev/null 2>&1; then
+    RESOLVED_INSTALLED=1
+    is_service_running "systemd-resolved" && RESOLVED_RUNNING=1
+    if [ "$RESOLVED_RUNNING" -eq 1 ]; then
+        # Check if mDNS is enabled on any link
+        if resolvectl mdns 2>/dev/null | grep -qi "yes"; then
+            RESOLVED_MDNS=1
+        elif grep -q "^MulticastDNS=yes" /etc/systemd/resolved.conf 2>/dev/null; then
+            RESOLVED_MDNS=1
+        fi
+    fi
+fi
+
+# troglobit/mdnsd (distinguish from Apple's)
+if command -v mdnsd >/dev/null 2>&1 && [ "$MDNSRESPONDER_INSTALLED" -eq 0 ]; then
+    # Check if this is troglobit's by looking for its config dir
+    if [ -d /etc/mdns.d ] || mdnsd --help 2>&1 | grep -qi "troglobit\|finit\|mdns.d"; then
+        MDNSD_INSTALLED=1
+        is_service_running "mdnsd" && MDNSD_RUNNING=1
+    fi
+fi
+
+# go-mdns (generic)
+if command -v go-mdns >/dev/null 2>&1; then
+    GOMDNS_INSTALLED=1
+    is_service_running "go-mdns" && GOMDNS_RUNNING=1
+fi
+
+# rust-mdns
+if command -v rust-mdns >/dev/null 2>&1; then
+    RUSTMDNS_INSTALLED=1
+    is_service_running "rust-mdns" && RUSTMDNS_RUNNING=1
+fi
+
+# ksmbd-go-mdns (our own)
+if command -v ksmbd-go-mdns >/dev/null 2>&1; then
+    KSMBDGOMDNS_INSTALLED=1
+    is_service_running "ksmbd-go-mdns" && KSMBDGOMDNS_RUNNING=1
+fi
+
+# ── Build installed list ─────────────────────────────────────
+
+_installed=""
+[ "$AVAHI_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}avahi"
+[ "$MDNSRESPONDER_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}mdnsresponder"
+[ "$RESOLVED_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}resolved"
+[ "$MDNSD_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}mdnsd"
+[ "$GOMDNS_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}go-mdns"
+[ "$RUSTMDNS_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}rust-mdns"
+[ "$KSMBDGOMDNS_INSTALLED" -eq 1 ] && _installed="${_installed:+$_installed,}ksmbd-go-mdns"
+
+# ── Select backend (preference order) ────────────────────────
+
+MDNS_BACKEND="none"
+MDNS_ACTIVE="no"
+MDNS_NEEDS_ACTIVATION="no"
+
+# First: any running + enabled backend (by preference)
+if [ "$AVAHI_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="avahi"; MDNS_ACTIVE="yes"
+elif [ "$MDNSRESPONDER_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="mdnsresponder"; MDNS_ACTIVE="yes"
+elif [ "$RESOLVED_RUNNING" -eq 1 ] && [ "$RESOLVED_MDNS" -eq 1 ]; then
+    MDNS_BACKEND="resolved"; MDNS_ACTIVE="yes"
+elif [ "$MDNSD_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="mdnsd"; MDNS_ACTIVE="yes"
+elif [ "$GOMDNS_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="go-mdns"; MDNS_ACTIVE="yes"
+elif [ "$RUSTMDNS_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="rust-mdns"; MDNS_ACTIVE="yes"
+elif [ "$KSMBDGOMDNS_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="ksmbd-go-mdns"; MDNS_ACTIVE="yes"
+fi
+
+# Special: resolved is running but mDNS not enabled — still usable
+if [ "$MDNS_BACKEND" = "none" ] && [ "$RESOLVED_RUNNING" -eq 1 ]; then
+    MDNS_BACKEND="resolved"; MDNS_ACTIVE="no"; MDNS_NEEDS_ACTIVATION="yes"
+fi
+
+# Second: installed but not running (by preference)
+if [ "$MDNS_BACKEND" = "none" ]; then
+    if [ "$AVAHI_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="avahi"; MDNS_NEEDS_ACTIVATION="yes"
+    elif [ "$MDNSRESPONDER_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="mdnsresponder"; MDNS_NEEDS_ACTIVATION="yes"
+    elif [ "$RESOLVED_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="resolved"; MDNS_NEEDS_ACTIVATION="yes"
+    elif [ "$MDNSD_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="mdnsd"; MDNS_NEEDS_ACTIVATION="yes"
+    elif [ "$GOMDNS_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="go-mdns"; MDNS_NEEDS_ACTIVATION="yes"
+    elif [ "$RUSTMDNS_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="rust-mdns"; MDNS_NEEDS_ACTIVATION="yes"
+    elif [ "$KSMBDGOMDNS_INSTALLED" -eq 1 ]; then
+        MDNS_BACKEND="ksmbd-go-mdns"; MDNS_NEEDS_ACTIVATION="yes"
+    fi
+fi
+
+# ── Port 5353 ownership ──────────────────────────────────────
+
+MDNS_PORT5353_OWNER="$(detect_port5353_owner)"
+[ -z "$MDNS_PORT5353_OWNER" ] && MDNS_PORT5353_OWNER="none"
+
+# If a backend is active but doesn't own 5353, and the 5353 owner is
+# a different known backend, prefer the actual 5353 owner
+if [ "$MDNS_ACTIVE" = "yes" ] && [ "$MDNS_PORT5353_OWNER" != "none" ]; then
+    case "$MDNS_PORT5353_OWNER" in
+        avahi-daemon)
+            [ "$MDNS_BACKEND" != "avahi" ] && MDNS_BACKEND="avahi" ;;
+        systemd-resolve*)
+            [ "$MDNS_BACKEND" != "resolved" ] && MDNS_BACKEND="resolved" ;;
+        mdnsd)
+            # Could be troglobit or Apple — keep current selection
+            ;;
+    esac
+fi
+
+# ── Container check ──────────────────────────────────────────
+
+MDNS_CONTAINER="$(detect_container 2>/dev/null)" || true
+[ -z "$MDNS_CONTAINER" ] && MDNS_CONTAINER="none"
+
+# ── Stateless check ──────────────────────────────────────────
+
+MDNS_STATELESS="no"
+_test_state="/var/lib/ksmbd/.detect-test.$$"
+if ! touch "$_test_state" 2>/dev/null; then
+    MDNS_STATELESS="yes"
+else
+    rm -f "$_test_state"
+fi
+
+# ── Output ────────────────────────────────────────────────────
+
+echo "MDNS_BACKEND=$MDNS_BACKEND"
+echo "MDNS_ACTIVE=$MDNS_ACTIVE"
+echo "MDNS_PORT5353_OWNER=$MDNS_PORT5353_OWNER"
+echo "MDNS_INSTALLED=$_installed"
+echo "MDNS_NEEDS_ACTIVATION=$MDNS_NEEDS_ACTIVATION"
+echo "MDNS_CONTAINER=$MDNS_CONTAINER"
+echo "MDNS_STATELESS=$MDNS_STATELESS"
