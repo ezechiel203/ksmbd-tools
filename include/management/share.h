@@ -63,10 +63,10 @@ struct ksmbd_share {
 
 	GHashTable	*maps[KSMBD_SHARE_USERS_MAX];
 	/*
-	 * FIXME
-	 * We need to support IP ranges, netmasks, etc.
-	 * This is just a silly hostname matching, hence
-	 * these two are not in ->maps[].
+	 * Host-based access control maps. Entries may be exact
+	 * IP addresses, CIDR notation (e.g., 192.168.1.0/24,
+	 * fd00::/64), or hostnames. Matching is performed by
+	 * match_host_cidr() in share.c.
 	 */
 	GHashTable	*hosts_allow_map;
 	/* Deny access */
@@ -134,9 +134,7 @@ extern const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX];
 	 (c) == KSMBD_SHARE_CONF_MAX_CONNECTIONS)
 
 #define KSMBD_SHARE_CONF_IS_BROKEN(c) \
-	((c) == KSMBD_SHARE_CONF_ADMIN_USERS || \
-	 (c) == KSMBD_SHARE_CONF_HOSTS_ALLOW || \
-	 (c) == KSMBD_SHARE_CONF_HOSTS_DENY)
+	((c) == KSMBD_SHARE_CONF_ADMIN_USERS)
 
 int shm_share_name(char *name, char *p);
 int shm_share_config(const char *k, enum KSMBD_SHARE_CONF c);

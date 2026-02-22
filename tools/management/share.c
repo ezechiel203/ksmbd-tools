@@ -13,6 +13,7 @@
 #include <grp.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <arpa/inet.h>
 
 #include "config_parser.h"
 #include "linux/ksmbd_server.h"
@@ -889,15 +890,91 @@ int shm_lookup_users_map(struct ksmbd_share *share,
 	return ret;
 }
 
-/*
- * FIXME
- * Do a real hosts lookup. IP masks, etc.
+/**
+ * match_host_cidr() - Check if a host address matches a pattern.
+ * @pattern:	The pattern to match against. Can be:
+ *		- CIDR notation (e.g., "192.168.1.0/24" or "fd00::/64")
+ *		- Exact IP or hostname string
+ * @addr:	The client address to check.
+ *
+ * If the pattern contains '/', it is parsed as CIDR and a subnet
+ * match is performed using inet_pton(). Supports both IPv4 and IPv6.
+ * If CIDR parsing fails or the pattern has no '/', falls back to
+ * exact string comparison for backward compatibility.
+ *
+ * Return:	1 if the address matches the pattern, 0 otherwise.
  */
+static int match_host_cidr(const char *pattern, const char *addr)
+{
+	const char *slash;
+	char network_str[INET6_ADDRSTRLEN + 1];
+	int prefix_len;
+	size_t net_len;
+	int af;
+	unsigned char net_addr[sizeof(struct in6_addr)];
+	unsigned char host_addr[sizeof(struct in6_addr)];
+	int addr_len;
+	int full_bytes, remaining_bits;
+	int i;
+	unsigned char mask;
+
+	slash = strchr(pattern, '/');
+	if (!slash)
+		return !strcmp(pattern, addr);
+
+	net_len = slash - pattern;
+	if (net_len == 0 || net_len >= sizeof(network_str))
+		return !strcmp(pattern, addr);
+
+	memcpy(network_str, pattern, net_len);
+	network_str[net_len] = '\0';
+
+	prefix_len = atoi(slash + 1);
+	if (prefix_len < 0)
+		return !strcmp(pattern, addr);
+
+	/* Determine address family */
+	if (strchr(network_str, ':'))
+		af = AF_INET6;
+	else
+		af = AF_INET;
+
+	if (inet_pton(af, network_str, net_addr) != 1)
+		return !strcmp(pattern, addr);
+
+	if (inet_pton(af, addr, host_addr) != 1)
+		return !strcmp(pattern, addr);
+
+	addr_len = (af == AF_INET6) ? 16 : 4;
+
+	if (prefix_len > addr_len * 8)
+		return !strcmp(pattern, addr);
+
+	full_bytes = prefix_len / 8;
+	remaining_bits = prefix_len % 8;
+
+	for (i = 0; i < full_bytes; i++) {
+		if (net_addr[i] != host_addr[i])
+			return 0;
+	}
+
+	if (remaining_bits > 0) {
+		mask = (unsigned char)(0xFF << (8 - remaining_bits));
+		if ((net_addr[full_bytes] & mask) !=
+		    (host_addr[full_bytes] & mask))
+			return 0;
+	}
+
+	return 1;
+}
+
 int shm_lookup_hosts_map(struct ksmbd_share *share,
 			  enum share_hosts map,
 			  char *host)
 {
 	GHashTable *lookup_map = NULL;
+	GHashTableIter iter;
+	const char *pattern;
 	int ret = -ENOENT;
 
 	if (map >= KSMBD_SHARE_HOSTS_MAX) {
@@ -914,8 +991,13 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 		return -EINVAL;
 
 	g_rw_lock_reader_lock(&share->maps_lock);
-	if (g_hash_table_lookup(lookup_map, host))
-		ret = 0;
+	g_hash_table_iter_init(&iter, lookup_map);
+	while (g_hash_table_iter_next(&iter, (gpointer *)&pattern, NULL)) {
+		if (match_host_cidr(pattern, host)) {
+			ret = 0;
+			break;
+		}
+	}
 	g_rw_lock_reader_unlock(&share->maps_lock);
 
 	return ret;
