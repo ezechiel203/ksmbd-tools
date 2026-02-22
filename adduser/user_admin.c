@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <string.h>
 
 #include <config_parser.h>
 #include <tools.h>
@@ -104,6 +105,7 @@ static void __prompt_password_stdin(char *password, size_t *sz)
 	printf("\eD" "\r" "\e[2K");
 
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &term);
+	explicit_bzero(buf, sizeof(buf));
 }
 
 static int __is_valid_password_len(size_t len)

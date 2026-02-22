@@ -19,7 +19,8 @@
 #include <management/tree_conn.h>
 #include <management/spnego.h>
 
-#define MAX_WORKER_THREADS	4
+#define DEFAULT_WORKER_THREADS	4
+#define MAX_WORKER_THREADS	64
 static GThreadPool *pool;
 
 #define VALID_IPC_MSG(m, t)					\
@@ -377,11 +378,16 @@ void wp_destroy(void)
 
 void wp_init(void)
 {
+	int num_threads = global_conf.max_worker_threads;
+
+	if (num_threads < 1 || num_threads > MAX_WORKER_THREADS)
+		num_threads = DEFAULT_WORKER_THREADS;
+
 	if (!pool)
 		pool = g_thread_pool_new(
 			worker_pool_fn,
 			NULL,
-			MAX_WORKER_THREADS,
+			num_threads,
 			0,
 			NULL);
 }

@@ -62,6 +62,7 @@ struct smbconf_global {
 	char			*krb5_service_name;
 	int			krb5_support;
 	char			*fruit_model;
+	int			max_worker_threads;
 	char			*pwddb;
 	char			*smbconf;
 	pid_t			pid;

@@ -600,6 +600,14 @@ static int process_global_conf_kv(GHashTable *kv)
 				KSMBD_CONF_MAX_CONNECTIONS;
 	}
 
+	if (group_kv_steal(kv, "max worker threads", &k, &v)) {
+		global_conf.max_worker_threads = cp_get_group_kv_long(v);
+		if (global_conf.max_worker_threads < 1)
+			global_conf.max_worker_threads = 4;
+		if (global_conf.max_worker_threads > 64)
+			global_conf.max_worker_threads = 64;
+	}
+
 	return 0;
 }
 
@@ -621,6 +629,7 @@ static void add_group_global_conf(void)
 	add_group_key_value("fruit extensions = yes");
 	add_group_key_value("fruit model = Xserve");
 	add_group_key_value("fruit zero file id = yes");
+	add_group_key_value("max worker threads = 4");
 	add_group_key_value("server signing = auto");
 }
 

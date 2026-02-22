@@ -65,6 +65,7 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"fruit finder info",
 	"fruit resource fork size",
 /*35*/	"fruit max access",
+	"continuous availability",
 };
 
 /*
@@ -111,6 +112,7 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"yes",
 	"no",
 /*35*/	"yes",
+	"no",
 };
 
 static GHashTable	*shares_table;
@@ -800,6 +802,16 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			set_share_flag(share, KSMBD_SHARE_FLAG_FRUIT_MAX_ACCESS);
 		else
 			clear_share_flag(share, KSMBD_SHARE_FLAG_FRUIT_MAX_ACCESS);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_CONTINUOUS_AVAILABILITY,
+			   &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share,
+				       KSMBD_SHARE_FLAG_CONTINUOUS_AVAILABILITY);
+		else
+			clear_share_flag(share,
+					 KSMBD_SHARE_FLAG_CONTINUOUS_AVAILABILITY);
 	}
 
 	return 0;

@@ -31,7 +31,10 @@ static void kill_ksmbd_user(struct ksmbd_user *user)
 
 	g_free(user->name);
 	g_free(user->pass_b64);
-	g_free(user->pass);
+	if (user->pass) {
+		explicit_bzero(user->pass, user->pass_sz);
+		g_free(user->pass);
+	}
 	g_free(user->sgid);
 	g_rw_lock_clear(&user->update_lock);
 	g_free(user);

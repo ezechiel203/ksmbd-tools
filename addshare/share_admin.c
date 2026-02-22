@@ -71,6 +71,7 @@ static const char *__defconf_fmt[KSMBD_SHARE_CONF_MAX] = {
 	"; expose Finder info in readdir responses [%s]",
 	"; expose resource fork sizes in readdir responses [%s]",
 /*35*/	"; expose max access in readdir responses [%s]",
+	"; enable continuous availability for this share [%s]",
 };
 
 static char **__get_options(GHashTable *kv, int is_global)

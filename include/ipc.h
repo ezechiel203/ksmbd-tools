@@ -12,7 +12,7 @@
  * Older [prior to 4.9] kernels had max NL recv msg size of 16k.
  * It has been bumped to 32K later on.
  */
-#define KSMBD_IPC_MAX_MESSAGE_SIZE	(16 * 1024)
+#define KSMBD_IPC_MAX_MESSAGE_SIZE	(64 * 1024)
 
 /*
  * The netlink socket's receive buffer size needs to be increased
