@@ -602,6 +602,7 @@ static int process_global_conf_kv(GHashTable *kv)
 	}
 #endif /* CONFIG_KSMBD_FRUIT */
 
+#ifdef CONFIG_KSMBD_MDNS
 	if (group_kv_steal(kv, "mdns bonjour", &k, &v)) {
 		if (!cp_key_cmp(v, "yes") || !cp_key_cmp(v, "true") ||
 		    !cp_key_cmp(v, "1"))
@@ -615,6 +616,7 @@ static int process_global_conf_kv(GHashTable *kv)
 
 	if (group_kv_steal(kv, "mdns backend", &k, &v))
 		global_conf.mdns_backend = cp_get_group_kv_string(v);
+#endif /* CONFIG_KSMBD_MDNS */
 
 	return 0;
 }
@@ -635,8 +637,10 @@ static void add_group_global_conf(void)
 	add_group_key_value("tcp port = 445");
 	add_group_key_value("workgroup = WORKGROUP");
 	add_group_key_value("server signing = auto");
+#ifdef CONFIG_KSMBD_MDNS
 	add_group_key_value("mdns bonjour = auto");
 	add_group_key_value("mdns backend = auto");
+#endif
 }
 
 static void steal_global_share_conf_kv(GHashTable *kv)

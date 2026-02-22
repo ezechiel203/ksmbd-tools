@@ -15,6 +15,8 @@
 # Please submit bugfixes or comments via https://bugs.opensuse.org/
 #
 
+%bcond_without mdns
+
 Name:           ksmbd-tools
 Version:        master
 Release:        0
@@ -42,19 +44,29 @@ Collection of userspace utilities for the ksmbd kernel server.
 
 %build
 ./autogen.sh
-%configure --with-systemdsystemunitdir=%{_unitdir}
+%configure --with-systemdsystemunitdir=%{_unitdir} \
+%if %{with mdns}
+           --enable-mdns \
+%else
+           --disable-mdns \
+%endif
+           %{nil}
 make %{?_smp_mflags}
 
 %install
 %make_install
 
 %post
+%if %{with mdns}
 /usr/lib/ksmbd/ksmbd-mdns-postinstall || true
+%endif
 
 %preun
+%if %{with mdns}
 if [ "$1" -eq 0 ]; then
     /usr/sbin/ksmbd-mdns remove 2>/dev/null || true
 fi
+%endif
 
 %files
 %{_sbindir}/ksmbd.addshare
@@ -70,6 +82,7 @@ fi
 %{_mandir}/man5/ksmbdpwd.db.5*
 %{_sysconfdir}/ksmbd/ksmbd.conf.example
 %{_unitdir}/ksmbd.service
+%if %{with mdns}
 %{_sbindir}/ksmbd-mdns
 %dir %{_libdir}/ksmbd
 %{_libdir}/ksmbd/ksmbd-mdns-lib.sh
@@ -84,5 +97,6 @@ fi
 %ghost /var/lib/ksmbd/shares.uuid
 %ghost /var/lib/ksmbd/shares.cache
 %ghost /var/lib/ksmbd/mdns.state
+%endif
 
 %changelog

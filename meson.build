@@ -100,6 +100,13 @@ if get_option('fruit').enabled()
   )
 endif
 
+if get_option('mdns').enabled()
+  config_h_data.set(
+    'CONFIG_KSMBD_MDNS',
+    true,
+  )
+endif
+
 configure_file(
   output: 'config.h',
   configuration: config_h_data,
@@ -161,6 +168,42 @@ configure_file(
   install_dir: systemdsystemunitdir,
   configuration: in_data,
 )
+
+if get_option('mdns').enabled()
+  install_data(
+    sources: 'contrib/mdns/ksmbd-mdns',
+    install_dir: get_option('sbindir'),
+    install_mode: 'rwxr-xr-x',
+  )
+
+  mdns_libdir = get_option('prefix') / get_option('libdir') / 'ksmbd'
+  install_data(
+    sources: [
+      'contrib/mdns/ksmbd-mdns-lib.sh',
+      'contrib/mdns/ksmbd-mdns-detect',
+      'contrib/mdns/ksmbd-mdns-configure',
+      'contrib/mdns/ksmbd-mdns-hook',
+      'contrib/mdns/ksmbd-mdns-postinstall',
+    ],
+    install_dir: mdns_libdir,
+    install_mode: 'rwxr-xr-x',
+  )
+
+  mdns_in_data = configuration_data({
+    'libdir': get_option('prefix') / get_option('libdir'),
+  })
+  configure_file(
+    input: 'contrib/mdns/init/ksmbd-mdns.service.in',
+    output: 'ksmbd-mdns.service',
+    install_dir: systemdsystemunitdir,
+    configuration: mdns_in_data,
+  )
+
+  install_subdir(
+    'contrib/mdns/templates',
+    install_dir: get_option('datadir') / 'ksmbd',
+  )
+endif
 
 subdir('addshare')
 subdir('adduser')

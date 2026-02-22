@@ -30,3 +30,10 @@ option(
   value: 'enabled',
   description: 'Support for Apple Fruit SMB extensions (macOS compatibility)',
 )
+
+option(
+  'mdns',
+  type: 'feature',
+  value: 'enabled',
+  description: 'mDNS/Bonjour service discovery for automatic share advertisement',
+)

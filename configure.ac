@@ -43,6 +43,17 @@ AS_IF([test "x$enable_fruit" != xno], [
 	AC_DEFINE([CONFIG_KSMBD_FRUIT], [], [Define if Apple Fruit SMB extensions are enabled.])
 ])
 
+AC_ARG_ENABLE([mdns],
+              [AC_HELP_STRING([--enable-mdns], [Enable mDNS/Bonjour service discovery @<:@default=yes@:>@])],
+              [enable_mdns=$enableval],
+              [enable_mdns=yes])
+
+AS_IF([test "x$enable_mdns" != xno], [
+	AC_DEFINE([CONFIG_KSMBD_MDNS], [], [Define if mDNS/Bonjour service discovery is enabled.])
+])
+
+AM_CONDITIONAL(HAVE_MDNS, [test "x$enable_mdns" != xno])
+
 AC_ARG_ENABLE([krb5],
               [AC_HELP_STRING([--enable-krb5], [Enable Kerberos 5 authentication @<:@default=no@:>@])],
               [enable_krb5=$enableval],
