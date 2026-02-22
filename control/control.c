@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #include <fcntl.h>
 
+#include <signal.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <errno.h>
@@ -17,6 +18,7 @@
 
 #include "tools.h"
 #include "config_parser.h"
+#include <linux/ksmbd_server.h>
 
 #define PATH_CLASS_ATTR_KILL_SERVER	"/sys/class/ksmbd-control/kill_server"
 #define PATH_CLASS_ATTR_DEBUG		"/sys/class/ksmbd-control/debug"
@@ -29,7 +31,9 @@ static void usage(int status)
 		"       ksmbd.control [-v] -r\n"
 		"       ksmbd.control [-v] -l\n"
 		"       ksmbd.control [-v] -d COMPONENT\n"
-		"       ksmbd.control [-v] -c\n");
+		"       ksmbd.control [-v] -c\n"
+		"       ksmbd.control -S\n"
+		"       ksmbd.control -f\n");
 
 	if (status != EXIT_SUCCESS)
 		printf("Try `ksmbd.control --help' for more information.\n");
@@ -44,6 +48,8 @@ static void usage(int status)
 			"                           `ipc', `conn', or `rdma';\n"
 			"                           enabled ones are output enclosed in brackets (`[]')\n"
 			"  -c, --ksmbd-version      output ksmbd version information and exit\n"
+			"  -S, --status             display server status and exit\n"
+			"  -f, --features           display configured feature flags and exit\n"
 			"  -v, --verbose            be verbose\n"
 			"  -V, --version            output version information and exit\n"
 			"  -h, --help               display this help and exit\n"
@@ -57,6 +63,8 @@ static const struct option opts[] = {
 	{"list",		no_argument,		NULL,	'l' },
 	{"debug",		required_argument,	NULL,	'd' },
 	{"ksmbd-version",	no_argument,		NULL,	'c' },
+	{"status",		no_argument,		NULL,	'S' },
+	{"features",		no_argument,		NULL,	'f' },
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
@@ -301,12 +309,135 @@ err:
 	return ret;
 }
 
+static int read_sysfs_string(const char *path, char *buf, size_t bufsz)
+{
+	int fd;
+	ssize_t len;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return -errno;
+
+	len = read(fd, buf, bufsz - 1);
+	close(fd);
+	if (len < 0)
+		return -errno;
+
+	buf[len] = '\0';
+	/* Strip trailing newline */
+	if (len > 0 && buf[len - 1] == '\n')
+		buf[len - 1] = '\0';
+
+	return 0;
+}
+
+static int control_status(void)
+{
+	struct stat st;
+	int module_loaded;
+	char version[64] = "unknown";
+	char debug[256] = "";
+
+	/* Check if ksmbd module is loaded */
+	module_loaded = (stat("/sys/module/ksmbd", &st) == 0);
+
+	if (module_loaded) {
+		read_sysfs_string(PATH_MODULE_VERSION, version, sizeof(version));
+		printf("ksmbd module:   loaded (version %s)\n", version);
+	} else {
+		printf("ksmbd module:   not loaded\n");
+		printf("ksmbd.mountd:   not running\n");
+		return 0;
+	}
+
+	/* Check mountd status via lock file */
+	if (!cp_parse_lock() && global_conf.pid > 0) {
+		if (kill(global_conf.pid, 0) == 0)
+			printf("ksmbd.mountd:   running (PID %d)\n",
+			       global_conf.pid);
+		else
+			printf("ksmbd.mountd:   not running (stale PID %d)\n",
+			       global_conf.pid);
+	} else {
+		printf("ksmbd.mountd:   not running\n");
+	}
+
+	/* Read debug components */
+	if (!read_sysfs_string(PATH_CLASS_ATTR_DEBUG, debug, sizeof(debug)))
+		printf("Debug:          %s\n", debug);
+
+	return 0;
+}
+
+static const struct {
+	const char *name;
+	int flag;
+} feature_flags[] = {
+	{"SMB2 Leases",		KSMBD_GLOBAL_FLAG_SMB2_LEASES},
+	{"SMB2 Encryption",	KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION},
+	{"SMB3 Multichannel",	KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL},
+	{"Durable Handle",	KSMBD_GLOBAL_FLAG_DURABLE_HANDLE},
+	{"Fruit Extensions",	KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS},
+	{"Fruit Zero FileID",	KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID},
+	{"Fruit NFS ACEs",	KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES},
+	{"Fruit Copyfile",	KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE},
+};
+
+static const char *signing_to_str(int signing)
+{
+	switch (signing) {
+	case KSMBD_CONFIG_OPT_DISABLED:
+		return "disabled";
+	case KSMBD_CONFIG_OPT_ENABLED:
+		return "enabled";
+	case KSMBD_CONFIG_OPT_AUTO:
+		return "auto";
+	case KSMBD_CONFIG_OPT_MANDATORY:
+		return "mandatory";
+	default:
+		return "unknown";
+	}
+}
+
+static int control_features(void)
+{
+	int ret;
+	size_t i;
+
+	ret = load_config(PATH_PWDDB, PATH_SMBCONF);
+	if (ret) {
+		pr_err("Can't load configuration\n");
+		return ret;
+	}
+
+	printf("=== ksmbd Feature Status ===\n");
+	for (i = 0; i < ARRAY_SIZE(feature_flags); i++)
+		printf("  %-20s%s\n",
+		       feature_flags[i].name,
+		       (global_conf.flags & feature_flags[i].flag) ?
+			       "enabled" : "disabled");
+
+	printf("  %-20s%s\n", "Signing:",
+	       signing_to_str(global_conf.server_signing));
+	printf("  %-20s%s\n", "Min Protocol:",
+	       global_conf.server_min_protocol ?
+		       global_conf.server_min_protocol : "(default)");
+	printf("  %-20s%s\n", "Max Protocol:",
+	       global_conf.server_max_protocol ?
+		       global_conf.server_max_protocol : "(default)");
+	printf("  %-20s%d\n", "Max Worker Threads:",
+	       global_conf.max_worker_threads);
+
+	remove_config();
+	return 0;
+}
+
 int control_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
 	int c;
 
-	while ((c = getopt_long(argc, argv, "srld:cvVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "srld:cSfvVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':
 			ret = control_shutdown();
@@ -322,6 +453,12 @@ int control_main(int argc, char **argv)
 			goto out;
 		case 'c':
 			ret = control_show_version();
+			goto out;
+		case 'S':
+			ret = control_status();
+			goto out;
+		case 'f':
+			ret = control_features();
 			goto out;
 		case 'v':
 			set_log_level(PR_DEBUG);
