@@ -1,0 +1,182 @@
+#!/bin/sh
+# ksmbd-mdns — Manage mDNS/DNS-SD service advertisement for ksmbd.
+#
+# Usage: ksmbd-mdns <command> [options] [/path/to/ksmbd.conf]
+#
+# Commands:
+#   detect        Probe the system for mDNS backends
+#   configure     Generate mDNS config files from ksmbd.conf
+#   reconfigure   Re-detect backend and regenerate everything
+#   reload        Regenerate configs and reload the mDNS daemon
+#   remove        Remove all ksmbd mDNS configuration
+#   status        Show current mDNS state and health
+#   backup-list   List all config backups
+#   help          Show this help
+#
+# Options:
+#   --conf=PATH   Path to ksmbd.conf (default: /etc/ksmbd/ksmbd.conf)
+#   --dry-run     Show what would be done without writing
+#   --verbose     Verbose output
+#   --force       Skip idempotency check
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "/usr/lib/ksmbd/ksmbd-mdns-lib.sh" ]; then
+    . "/usr/lib/ksmbd/ksmbd-mdns-lib.sh"
+elif [ -f "$SCRIPT_DIR/ksmbd-mdns-lib.sh" ]; then
+    . "$SCRIPT_DIR/ksmbd-mdns-lib.sh"
+else
+    echo "Error: ksmbd-mdns-lib.sh not found" >&2; exit 1
+fi
+
+# Locate helper scripts
+find_helper() {
+    if [ -x "/usr/lib/ksmbd/$1" ]; then
+        echo "/usr/lib/ksmbd/$1"
+    elif [ -x "/usr/libexec/ksmbd/$1" ]; then
+        echo "/usr/libexec/ksmbd/$1"
+    elif [ -x "$SCRIPT_DIR/$1" ]; then
+        echo "$SCRIPT_DIR/$1"
+    else
+        log_error "Helper not found: $1"
+        exit 1
+    fi
+}
+
+DETECT="$(find_helper ksmbd-mdns-detect)"
+CONFIGURE="$(find_helper ksmbd-mdns-configure)"
+HOOK="$(find_helper ksmbd-mdns-hook)"
+
+# ── Parse command + options ───────────────────────────────────
+CMD=""
+OPTS=""
+CONF_ARG=""
+
+for _arg in "$@"; do
+    case "$_arg" in
+        detect|configure|reconfigure|reload|remove|status|backup-list|help)
+            CMD="$_arg" ;;
+        --conf=*)   CONF_ARG="$_arg"; OPTS="$OPTS $_arg" ;;
+        --dry-run)  DRY_RUN=1; OPTS="$OPTS $_arg" ;;
+        --verbose)  VERBOSE=1; OPTS="$OPTS $_arg" ;;
+        --force)    FORCE=1; OPTS="$OPTS $_arg" ;;
+        --help|-h)  CMD="help" ;;
+        -*)         OPTS="$OPTS $_arg" ;;
+        *)          CONF_ARG="--conf=$_arg"; OPTS="$OPTS --conf=$_arg" ;;
+    esac
+done
+
+if [ -z "$CMD" ]; then
+    CMD="help"
+fi
+
+# ── Dispatch ──────────────────────────────────────────────────
+case "$CMD" in
+    detect)
+        "$DETECT"
+        ;;
+
+    configure)
+        "$CONFIGURE" $OPTS
+        ;;
+
+    reconfigure)
+        rm -f "$STATE_FILE" 2>/dev/null
+        "$CONFIGURE" --force $OPTS
+        ;;
+
+    reload)
+        "$HOOK" $OPTS
+        ;;
+
+    remove)
+        "$CONFIGURE" --remove $OPTS
+        ;;
+
+    status)
+        echo "ksmbd-mdns status"
+        echo "────────────────────────────────────"
+
+        # Detection
+        eval "$("$DETECT")"
+        echo "Backend:     $MDNS_BACKEND ($( [ "$MDNS_ACTIVE" = "yes" ] && echo "active" || echo "inactive" ))"
+        echo "Port 5353:   owned by ${MDNS_PORT5353_OWNER:-unknown}"
+        echo "Installed:   ${MDNS_INSTALLED:-none}"
+        echo "Container:   $MDNS_CONTAINER"
+        echo "Stateless:   $MDNS_STATELESS"
+
+        # UUID
+        if [ -f "$UUID_FILE" ]; then
+            echo "Server UUID: $(cat "$UUID_FILE")"
+        else
+            echo "Server UUID: (not generated)"
+        fi
+
+        # State
+        if [ -f "$STATE_FILE" ]; then
+            echo "State:       $STATE_FILE ($(cat "$STATE_FILE" | grep MDNS_BACKEND | head -1))"
+        else
+            echo "State:       (no state file)"
+        fi
+
+        # Cache
+        if [ -f "$CACHE_FILE" ]; then
+            _cached_hash="$(grep '^HASH=' "$CACHE_FILE" 2>/dev/null | head -1 | cut -d= -f2)"
+            echo "Cache:       hash=$_cached_hash"
+        else
+            echo "Cache:       (no cache)"
+        fi
+
+        # Generated files
+        echo ""
+        echo "Generated files:"
+        for _f in \
+            /etc/avahi/services/ksmbd-smb.service \
+            /etc/avahi/services/ksmbd-timemachine.service \
+            /etc/systemd/dnssd/ksmbd-smb.dnssd \
+            /etc/systemd/dnssd/ksmbd-adisk.dnssd \
+            /etc/systemd/resolved.conf.d/ksmbd-mdns.conf \
+            /etc/systemd/network/10-ksmbd-mdns.network \
+            /etc/NetworkManager/conf.d/ksmbd-mdns.conf \
+            /etc/mdns.d/ksmbd-smb.service \
+            /etc/mdns.d/ksmbd-adisk.service \
+            /usr/local/lib/ksmbd/ksmbd-mdns-register; do
+            [ -f "$_f" ] && echo "  $_f  OK"
+        done
+
+        # Backups
+        echo ""
+        if [ -d "$BACKUP_DIR" ]; then
+            _bcount="$(ls -1 "$BACKUP_DIR" 2>/dev/null | grep -v manifest | wc -l)"
+            echo "Backups: $_bcount file(s) in $BACKUP_DIR"
+        else
+            echo "Backups: none"
+        fi
+        ;;
+
+    backup-list)
+        if [ -f "$BACKUP_DIR/manifest" ]; then
+            echo "Backup manifest ($BACKUP_DIR/manifest):"
+            echo "────────────────────────────────────"
+            while IFS='|' read -r _ts _src _dst; do
+                echo "  $_ts  $_src"
+                echo "         -> $_dst"
+            done < "$BACKUP_DIR/manifest"
+        else
+            echo "No backups found."
+        fi
+        ;;
+
+    help)
+        sed -n '2,/^[^#]/p' "$0" | sed '/^[^#]/d; s/^# \?//'
+        ;;
+
+    *)
+        log_error "Unknown command: $CMD"
+        echo "Run 'ksmbd-mdns help' for usage."
+        exit 1
+        ;;
+esac
