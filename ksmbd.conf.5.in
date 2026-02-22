@@ -190,6 +190,23 @@ With \fBmap to guest = bad user\fR, map when the user does not exist.
 
 Default: \fBmap to guest = never\fR
 .TP
+\fBmdns bonjour\fR (G)
+Control mDNS/DNS-SD (Bonjour) service advertisement for ksmbd shares.
+When set to \fByes\fR, mDNS advertisement is always configured (error
+if no mDNS daemon is found). When \fBauto\fR, advertisement is
+configured if a supported mDNS daemon is detected. When \fBno\fR,
+mDNS advertisement is disabled.
+
+Supported backends: Avahi, systemd-resolved, mDNSResponder, mdnsd.
+
+Default: \fBmdns bonjour = auto\fR
+.TP
+\fBmdns backend\fR (G)
+Force a specific mDNS backend instead of auto-detection. Valid values:
+\fBavahi\fR, \fBresolved\fR, \fBmdnsresponder\fR, \fBmdnsd\fR, \fBauto\fR.
+
+Default: \fBmdns backend = auto\fR
+.TP
 \fBmax active sessions\fR (G)
 Maximum number of simultaneous sessions to all shares.
 

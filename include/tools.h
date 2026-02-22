@@ -65,6 +65,8 @@ struct smbconf_global {
 	char			*pwddb;
 	char			*smbconf;
 	pid_t			pid;
+	int		mdns_bonjour;	/* 0=no, 1=yes, 2=auto */
+	char		*mdns_backend;
 };
 
 #define KSMBD_RESTRICT_ANON_TYPE_1	1

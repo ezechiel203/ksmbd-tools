@@ -39,6 +39,8 @@
 	smbd max io size = 8MB
 	tcp port = 445
 	workgroup = WORKGROUP
+	mdns bonjour = auto
+	mdns backend = auto
 
 	; default share parameters
 	browseable = yes
