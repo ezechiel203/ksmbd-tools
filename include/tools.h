@@ -116,6 +116,7 @@ extern int log_level;
 
 #define PR_LOGGER_STDIO         0
 #define PR_LOGGER_SYSLOG        1
+#define PR_LOGGER_JSON          2
 
 G_GNUC_PRINTF(2, 3)
 extern void __pr_log(int level, const char *fmt, ...);

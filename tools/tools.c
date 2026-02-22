@@ -53,6 +53,96 @@ static int syslog_level(int level)
 	return LOG_ERR;
 }
 
+static const char *json_level_str(int level)
+{
+	if (level == PR_ERROR)
+		return "error";
+	if (level == PR_INFO)
+		return "info";
+	if (level == PR_DEBUG)
+		return "debug";
+
+	return "error";
+}
+
+static void json_escape_string(const char *src, char *dst, size_t dst_sz)
+{
+	size_t di = 0;
+
+	while (*src && di + 2 < dst_sz) {
+		if (*src == '"' || *src == '\\') {
+			dst[di++] = '\\';
+			if (di + 1 >= dst_sz)
+				break;
+			dst[di++] = *src;
+		} else if (*src == '\n') {
+			dst[di++] = '\\';
+			if (di + 1 >= dst_sz)
+				break;
+			dst[di++] = 'n';
+		} else if (*src == '\t') {
+			dst[di++] = '\\';
+			if (di + 1 >= dst_sz)
+				break;
+			dst[di++] = 't';
+		} else if ((unsigned char)*src >= 0x20) {
+			dst[di++] = *src;
+		}
+		src++;
+	}
+	dst[di] = '\0';
+}
+
+/*
+ * Strip ANSI escape codes and the LOGAPP prefix pattern
+ * "[tool_name/pid]: LEVEL: " from the message.
+ */
+static void strip_log_prefix(char *msg)
+{
+	char *src = msg, *dst = msg;
+
+	/* Strip ANSI escape codes */
+	while (*src) {
+		if (*src == '\033') {
+			while (*src && *src != 'm')
+				src++;
+			if (*src == 'm')
+				src++;
+			continue;
+		}
+		*dst++ = *src++;
+	}
+	*dst = '\0';
+
+	/* Strip "[tool/pid]: LEVEL: " prefix */
+	src = msg;
+	if (*src == '[') {
+		char *close = strchr(src, ']');
+
+		if (close) {
+			src = close + 1;
+			/* Skip ":" and spaces */
+			while (*src == ':' || *src == ' ')
+				src++;
+			/* Skip level tag (ERROR/INFO/DEBUG) */
+			if (!strncmp(src, "ERROR: ", 7))
+				src += 7;
+			else if (!strncmp(src, "INFO: ", 6))
+				src += 6;
+			else if (!strncmp(src, "DEBUG: ", 7))
+				src += 7;
+		}
+	}
+
+	if (src != msg)
+		memmove(msg, src, strlen(src) + 1);
+
+	/* Strip trailing newline */
+	dst = msg + strlen(msg);
+	while (dst > msg && (*(dst - 1) == '\n' || *(dst - 1) == '\r'))
+		*--dst = '\0';
+}
+
 G_GNUC_PRINTF(2, 0)
 static void __pr_log_stdio(int level, const char *fmt, va_list list)
 {
@@ -66,6 +156,24 @@ G_GNUC_PRINTF(2, 0)
 static void __pr_log_syslog(int level, const char *fmt, va_list list)
 {
 	vsyslog(syslog_level(level), fmt, list);
+}
+
+G_GNUC_PRINTF(2, 0)
+static void __pr_log_json(int level, const char *fmt, va_list list)
+{
+	char buf[1024];
+	char escaped[2048];
+	struct timespec ts;
+
+	vsnprintf(buf, sizeof(buf), fmt, list);
+	strip_log_prefix(buf);
+	json_escape_string(buf, escaped, sizeof(escaped));
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+
+	printf("{\"ts\":%ld.%03ld,\"level\":\"%s\",\"msg\":\"%s\"}\n",
+	       (long)ts.tv_sec, ts.tv_nsec / 1000000,
+	       json_level_str(level), escaped);
 }
 
 static logger __logger = __pr_log_stdio;
@@ -89,6 +197,12 @@ void pr_logger_init(int flag)
 		openlog("ksmbd", LOG_NDELAY, LOG_LOCAL5);
 		__logger = __pr_log_syslog;
 		log_open = 1;
+	} else if (flag == PR_LOGGER_JSON) {
+		if (log_open) {
+			closelog();
+			log_open = 0;
+		}
+		__logger = __pr_log_json;
 	}
 }
 
