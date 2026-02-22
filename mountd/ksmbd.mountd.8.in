@@ -3,7 +3,7 @@
 ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 .SH SYNOPSIS
 .B ksmbd.mountd
-[\-v] [\-p \fI\,PORT\/\fR] [\-n[\fI\,WAY\/\fR]] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR]
+[\-v] [\-p \fI\,PORT\/\fR] [\-n[\fI\,WAY\/\fR]] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR] [\-\-fruit\-*] [\-\-mdns\-*]
 .SH DESCRIPTION
 \fBksmbd.mountd\fR starts \fBksmbd.mountd\fR user mode and \fBksmbd\fR kernel mode daemons.
 \fBksmbd.mountd\fR has to parse \fBksmbd.conf\fR(5) configuration file in order to start.
@@ -32,6 +32,35 @@ Output version information and exit.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Display this help and exit.
+.SS "Apple/macOS (Fruit) Options"
+Override global fruit settings from \fBksmbd.conf\fR(5).
+These options are only available when built with fruit support.
+CLI values take precedence over configuration file values, including on reload.
+.TP
+\fB\-\-fruit\-extensions\fR=\fI\,BOOL\/\fR
+Enable Apple Fruit SMB extensions.
+.TP
+\fB\-\-fruit\-zero\-fileid\fR=\fI\,BOOL\/\fR
+Return zero file IDs for dot files.
+.TP
+\fB\-\-fruit\-nfs\-aces\fR=\fI\,BOOL\/\fR
+Support NFS-style ACEs.
+.TP
+\fB\-\-fruit\-copyfile\fR=\fI\,BOOL\/\fR
+Support server-side file copy.
+.TP
+\fB\-\-fruit\-model\fR=\fI\,MODEL\/\fR
+Set advertised device model string.
+.SS "mDNS/Bonjour Options"
+Override mDNS settings from \fBksmbd.conf\fR(5).
+These options are only available when built with mDNS support.
+CLI values take precedence over configuration file values, including on reload.
+.TP
+\fB\-\-mdns\-bonjour\fR=\fI\,MODE\/\fR
+Set mDNS advertisement mode (\fByes\fR, \fBno\fR, or \fBauto\fR).
+.TP
+\fB\-\-mdns\-backend\fR=\fI\,BACKEND\/\fR
+Force mDNS backend (\fBavahi\fR, \fBresolved\fR, \fBmdnsresponder\fR, \fBmdnsd\fR, or \fBauto\fR).
 .SH "EXIT STATUS"
 The exit status is 0 on success and 1 on failure.
 When detaching process from foreground, exit status is 0 if daemonization succeeded.

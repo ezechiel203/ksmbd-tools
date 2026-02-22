@@ -15,8 +15,18 @@
 #include <sys/stat.h>
 #include <glib.h>
 
+#include <sys/wait.h>
+
 #include "tools.h"
 #include "config_parser.h"
+
+#ifdef CONFIG_KSMBD_MDNS
+enum {
+	OPT_MDNS_STATUS = 256,
+	OPT_MDNS_RECONFIGURE,
+	OPT_MDNS_REMOVE,
+};
+#endif
 
 #define PATH_CLASS_ATTR_KILL_SERVER	"/sys/class/ksmbd-control/kill_server"
 #define PATH_CLASS_ATTR_DEBUG		"/sys/class/ksmbd-control/debug"
@@ -29,7 +39,13 @@ static void usage(int status)
 		"       ksmbd.control [-v] -r\n"
 		"       ksmbd.control [-v] -l\n"
 		"       ksmbd.control [-v] -d COMPONENT\n"
-		"       ksmbd.control [-v] -c\n");
+		"       ksmbd.control [-v] -c\n"
+#ifdef CONFIG_KSMBD_MDNS
+		"       ksmbd.control --mdns-status\n"
+		"       ksmbd.control --mdns-reconfigure\n"
+		"       ksmbd.control --mdns-remove\n"
+#endif
+		);
 
 	if (status != EXIT_SUCCESS)
 		printf("Try `ksmbd.control --help' for more information.\n");
@@ -47,6 +63,13 @@ static void usage(int status)
 			"  -v, --verbose            be verbose\n"
 			"  -V, --version            output version information and exit\n"
 			"  -h, --help               display this help and exit\n"
+#ifdef CONFIG_KSMBD_MDNS
+			"\n"
+			"mDNS/Bonjour management:\n"
+			"      --mdns-status        show mDNS advertisement status and exit\n"
+			"      --mdns-reconfigure   reconfigure mDNS advertisements and exit\n"
+			"      --mdns-remove        remove all mDNS advertisements and exit\n"
+#endif
 			"\n"
 			"See ksmbd.control(8) for more details.\n");
 }
@@ -60,6 +83,11 @@ static const struct option opts[] = {
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
+#ifdef CONFIG_KSMBD_MDNS
+	{"mdns-status",		no_argument,		NULL,	OPT_MDNS_STATUS },
+	{"mdns-reconfigure",	no_argument,		NULL,	OPT_MDNS_RECONFIGURE },
+	{"mdns-remove",		no_argument,		NULL,	OPT_MDNS_REMOVE },
+#endif
 	{NULL,			0,			NULL,	 0  }
 };
 
@@ -301,6 +329,32 @@ err:
 	return ret;
 }
 
+#ifdef CONFIG_KSMBD_MDNS
+static int control_mdns_command(const char *cmd)
+{
+	g_autofree char *cmdline =
+		g_strdup_printf("ksmbd-mdns %s", cmd);
+	int ret;
+
+	ret = system(cmdline);
+	if (ret < 0) {
+		pr_err("Can't run ksmbd-mdns: %m\n");
+		return -errno;
+	}
+	if (WIFSIGNALED(ret)) {
+		pr_err("ksmbd-mdns %s killed by signal %d\n",
+		       cmd, WTERMSIG(ret));
+		return -EIO;
+	}
+	if (WIFEXITED(ret) && WEXITSTATUS(ret) != 0) {
+		pr_err("ksmbd-mdns %s failed (exit %d)\n",
+		       cmd, WEXITSTATUS(ret));
+		return -EIO;
+	}
+	return 0;
+}
+#endif
+
 int control_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
@@ -326,6 +380,17 @@ int control_main(int argc, char **argv)
 		case 'v':
 			set_log_level(PR_DEBUG);
 			break;
+#ifdef CONFIG_KSMBD_MDNS
+		case OPT_MDNS_STATUS:
+			ret = control_mdns_command("status");
+			goto out;
+		case OPT_MDNS_RECONFIGURE:
+			ret = control_mdns_command("reconfigure");
+			goto out;
+		case OPT_MDNS_REMOVE:
+			ret = control_mdns_command("remove");
+			goto out;
+#endif
 		case 'V':
 			ret = show_version();
 			goto out;

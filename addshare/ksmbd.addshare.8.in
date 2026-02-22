@@ -3,7 +3,7 @@
 ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.addshare
-[\-v] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR] [\-a | \-u | \-d] [\-o \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+[\-v] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR] [\-a | \-u | \-d] [\-o \fI\,OPT\/\fR]... [\-\-fruit\-*]... \fI\,SHARE\/\fR
 .SH DESCRIPTION
 \fBksmbd.addshare\fR configures shares for \fBksmbd.conf\fR(5) configuration file of \fBksmbd.mountd\fR(8) user mode daemon.
 \fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
@@ -43,6 +43,29 @@ Output version information and exit.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Display this help and exit.
+.SS "Apple/macOS (Fruit) Share Options"
+These options are convenience wrappers around \fB\-o\fR for configuring macOS compatibility.
+They are only available when built with fruit support.
+.TP
+\fB\-\-fruit\-time\-machine\fR=\fI\,BOOL\/\fR
+Enable Time Machine backup support for the share.
+Equivalent to \fB\-o\fR \fI\,"fruit time machine = BOOL"\/\fR.
+.TP
+\fB\-\-fruit\-finder\-info\fR=\fI\,BOOL\/\fR
+Enable Finder metadata support.
+Equivalent to \fB\-o\fR \fI\,"fruit finder info = BOOL"\/\fR.
+.TP
+\fB\-\-fruit\-rfork\-size\fR=\fI\,BOOL\/\fR
+Enable resource fork size reporting.
+Equivalent to \fB\-o\fR \fI\,"fruit rfork size = BOOL"\/\fR.
+.TP
+\fB\-\-fruit\-max\-access\fR=\fI\,BOOL\/\fR
+Enable maximum access mode support.
+Equivalent to \fB\-o\fR \fI\,"fruit max access = BOOL"\/\fR.
+.TP
+\fB\-\-time\-machine\-max\-size\fR=\fI\,SIZE\/\fR
+Set maximum backup size (0 for unlimited). Number suffixes are allowed.
+Equivalent to \fB\-o\fR \fI\,"time machine max size = SIZE"\/\fR.
 .SH "EXIT STATUS"
 The exit status is 0 on success and 1 on failure.
 Failure to notify \fBksmbd.mountd\fR of changes has no effect on exit status.

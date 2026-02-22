@@ -22,6 +22,84 @@
 #include "ipc.h"
 #include "management/share.h"
 #include "config_parser.h"
+#include "linux/ksmbd_server.h"
+
+enum {
+#ifdef CONFIG_KSMBD_FRUIT
+	OPT_FRUIT_EXTENSIONS = 256,
+	OPT_FRUIT_ZERO_FILEID,
+	OPT_FRUIT_NFS_ACES,
+	OPT_FRUIT_COPYFILE,
+	OPT_FRUIT_MODEL,
+#endif
+#ifdef CONFIG_KSMBD_MDNS
+	OPT_MDNS_BONJOUR = 280,
+	OPT_MDNS_BACKEND,
+#endif
+	OPT_SENTINEL
+};
+
+#ifdef CONFIG_KSMBD_FRUIT
+static int cli_fruit_extensions = -1;
+static int cli_fruit_zero_fileid = -1;
+static int cli_fruit_nfs_aces = -1;
+static int cli_fruit_copyfile = -1;
+static char *cli_fruit_model;
+#endif
+#ifdef CONFIG_KSMBD_MDNS
+static int cli_mdns_bonjour = -1;
+static char *cli_mdns_backend;
+#endif
+
+static void apply_cli_overrides(void)
+{
+#ifdef CONFIG_KSMBD_FRUIT
+	if (cli_fruit_extensions >= 0) {
+		if (cli_fruit_extensions)
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS;
+	}
+	if (cli_fruit_zero_fileid >= 0) {
+		if (cli_fruit_zero_fileid)
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID;
+	}
+	if (cli_fruit_nfs_aces >= 0) {
+		if (cli_fruit_nfs_aces)
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES;
+	}
+	if (cli_fruit_copyfile >= 0) {
+		if (cli_fruit_copyfile)
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE;
+	}
+	if (cli_fruit_model) {
+		g_free(global_conf.fruit_model);
+		global_conf.fruit_model = g_strdup(cli_fruit_model);
+	}
+#endif
+#ifdef CONFIG_KSMBD_MDNS
+	if (cli_mdns_bonjour >= 0)
+		global_conf.mdns_bonjour = cli_mdns_bonjour;
+	if (cli_mdns_backend) {
+		g_free(global_conf.mdns_backend);
+		global_conf.mdns_backend = g_strdup(cli_mdns_backend);
+	}
+#endif
+}
 
 static void usage(int status)
 {
@@ -44,6 +122,22 @@ static void usage(int status)
 			"  -v, --verbose           be verbose\n"
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
+#ifdef CONFIG_KSMBD_FRUIT
+			"\n"
+			"Apple/macOS (Fruit) options (override config file):\n"
+			"      --fruit-extensions=BOOL     enable Fruit SMB extensions\n"
+			"      --fruit-zero-fileid=BOOL    zero file IDs for dot files\n"
+			"      --fruit-nfs-aces=BOOL       NFS-style ACEs\n"
+			"      --fruit-copyfile=BOOL       server-side file copy\n"
+			"      --fruit-model=MODEL         device model string\n"
+#endif
+#ifdef CONFIG_KSMBD_MDNS
+			"\n"
+			"mDNS/Bonjour options (override config file):\n"
+			"      --mdns-bonjour=MODE         yes, no, or auto\n"
+			"      --mdns-backend=BACKEND      avahi, resolved, mdnsresponder,\n"
+			"                                  mdnsd, or auto\n"
+#endif
 			"\n"
 			"See ksmbd.mountd(8) for more details.\n");
 }
@@ -56,6 +150,17 @@ static struct option opts[] = {
 	{"verbose",	no_argument,		NULL,	'v' },
 	{"version",	no_argument,		NULL,	'V' },
 	{"help",	no_argument,		NULL,	'h' },
+#ifdef CONFIG_KSMBD_FRUIT
+	{"fruit-extensions",	required_argument,	NULL,	OPT_FRUIT_EXTENSIONS },
+	{"fruit-zero-fileid",	required_argument,	NULL,	OPT_FRUIT_ZERO_FILEID },
+	{"fruit-nfs-aces",	required_argument,	NULL,	OPT_FRUIT_NFS_ACES },
+	{"fruit-copyfile",	required_argument,	NULL,	OPT_FRUIT_COPYFILE },
+	{"fruit-model",		required_argument,	NULL,	OPT_FRUIT_MODEL },
+#endif
+#ifdef CONFIG_KSMBD_MDNS
+	{"mdns-bonjour",	required_argument,	NULL,	OPT_MDNS_BONJOUR },
+	{"mdns-backend",	required_argument,	NULL,	OPT_MDNS_BACKEND },
+#endif
 	{NULL,		0,			NULL,	 0  }
 };
 
@@ -259,6 +364,7 @@ static int worker_init(void)
 	ret = load_config(global_conf.pwddb, global_conf.smbconf);
 	if (ret)
 		goto out;
+	apply_cli_overrides();
 
 	for (;;) {
 		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
@@ -274,6 +380,7 @@ static int worker_init(void)
 			ret = load_config(global_conf.pwddb,
 					  global_conf.smbconf);
 			if (!ret) {
+				apply_cli_overrides();
 				pr_info("Reloaded config\n");
 				ksmbd_health_status &=
 					~KSMBD_SHOULD_RELOAD_CONFIG;
@@ -430,6 +537,43 @@ int mountd_main(int argc, char **argv)
 		case 'v':
 			set_log_level(PR_DEBUG);
 			break;
+
+#ifdef CONFIG_KSMBD_FRUIT
+		case OPT_FRUIT_EXTENSIONS:
+			cli_fruit_extensions =
+				cp_get_group_kv_bool(optarg);
+			break;
+		case OPT_FRUIT_ZERO_FILEID:
+			cli_fruit_zero_fileid =
+				cp_get_group_kv_bool(optarg);
+			break;
+		case OPT_FRUIT_NFS_ACES:
+			cli_fruit_nfs_aces =
+				cp_get_group_kv_bool(optarg);
+			break;
+		case OPT_FRUIT_COPYFILE:
+			cli_fruit_copyfile =
+				cp_get_group_kv_bool(optarg);
+			break;
+		case OPT_FRUIT_MODEL:
+			g_free(cli_fruit_model);
+			cli_fruit_model = g_strdup(optarg);
+			break;
+#endif
+#ifdef CONFIG_KSMBD_MDNS
+		case OPT_MDNS_BONJOUR:
+			if (!g_ascii_strcasecmp(optarg, "yes"))
+				cli_mdns_bonjour = 1;
+			else if (!g_ascii_strcasecmp(optarg, "no"))
+				cli_mdns_bonjour = 0;
+			else
+				cli_mdns_bonjour = 2;
+			break;
+		case OPT_MDNS_BACKEND:
+			g_free(cli_mdns_backend);
+			cli_mdns_backend = g_strdup(optarg);
+			break;
+#endif
 		case 'V':
 			ret = show_version();
 			goto out;

@@ -66,6 +66,11 @@ static const char *__defconf_fmt[KSMBD_SHARE_CONF_MAX] = {
 	"; list of vfs objects to overload io ops with [%s]",
 	"; users have read-write access [%s]",
 /*30*/	"; path lookup can cross mountpoints [%s]",
+	"; macOS Time Machine backup support [%s]",
+	"; macOS Finder metadata support [%s]",
+	"; macOS resource fork size reporting [%s]",
+	"; macOS maximum access mode support [%s]",
+/*35*/	"; Time Machine maximum backup size, 0=unlimited [%s]",
 };
 
 static char **__get_options(GHashTable *kv, int is_global)
@@ -77,7 +82,8 @@ static char **__get_options(GHashTable *kv, int is_global)
 		const char *k = KSMBD_SHARE_CONF[c], *v = NULL, *pre;
 
 		if ((is_global && KSMBD_SHARE_CONF_IS_GLOBAL(c)) ||
-		    KSMBD_SHARE_CONF_IS_BROKEN(c))
+		    KSMBD_SHARE_CONF_IS_BROKEN(c) ||
+		    KSMBD_SHARE_CONF_IS_FRUIT(c))
 			pre = "; ";
 		else
 			pre = "";
@@ -145,7 +151,8 @@ static enum KSMBD_SHARE_CONF __next_conf(enum KSMBD_SHARE_CONF conf,
 	}
 
 	if ((is_global && KSMBD_SHARE_CONF_IS_GLOBAL(conf)) ||
-	    KSMBD_SHARE_CONF_IS_BROKEN(conf))
+	    KSMBD_SHARE_CONF_IS_BROKEN(conf) ||
+	    KSMBD_SHARE_CONF_IS_FRUIT(conf))
 		return __next_conf(conf + step, step, is_global, is_ready);
 
 	if (step > 0)
@@ -332,6 +339,10 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_FOLLOW_SYMLINKS:
 	case KSMBD_SHARE_CONF_WRITABLE:
 	case KSMBD_SHARE_CONF_CROSSMNT:
+	case KSMBD_SHARE_CONF_FRUIT_TIME_MACHINE:
+	case KSMBD_SHARE_CONF_FRUIT_FINDER_INFO:
+	case KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE:
+	case KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS:
 		ml = new_va_ml(ml, p, "yes", "no", NULL);
 		break;
 	case KSMBD_SHARE_CONF_GUEST_ACCOUNT:
@@ -550,6 +561,7 @@ static GList *new_share_kl(struct smbconf_group *g)
 	for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++)
 		if ((!is_global || !KSMBD_SHARE_CONF_IS_GLOBAL(c)) &&
 		    !KSMBD_SHARE_CONF_IS_BROKEN(c) &&
+		    !KSMBD_SHARE_CONF_IS_FRUIT(c) &&
 		    g_hash_table_lookup_extended(g->kv,
 						 KSMBD_SHARE_CONF[c],
 						 (gpointer *)&k,

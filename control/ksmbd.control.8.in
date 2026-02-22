@@ -16,6 +16,9 @@ ksmbd.control \- control ksmbd.mountd and ksmbd daemons
 .br
 .B ksmbd.control
 [\-v] \-c
+.br
+.B ksmbd.control
+\-\-mdns\-status | \-\-mdns\-reconfigure | \-\-mdns\-remove
 .SH DESCRIPTION
 \fBksmbd.control\fR controls \fBksmbd.mountd\fR(8) user mode and \fBksmbd\fR kernel mode daemons.
 .SH OPTIONS
@@ -45,6 +48,19 @@ Output version information and exit.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Display this help and exit.
+.SS "mDNS/Bonjour Management"
+These commands manage the \fBksmbd\fR mDNS/DNS-SD service advertisement.
+They proxy to the \fBksmbd\-mdns\fR script.
+These options are only available when built with mDNS support.
+.TP
+\fB\-\-mdns\-status\fR
+Show current mDNS advertisement status and exit.
+.TP
+\fB\-\-mdns\-reconfigure\fR
+Reconfigure mDNS advertisements to match current shares and exit.
+.TP
+\fB\-\-mdns\-remove\fR
+Remove all mDNS advertisements and exit.
 .SH "EXIT STATUS"
 The exit status is 0 on success and 1 on failure.
 .SH COPYRIGHT

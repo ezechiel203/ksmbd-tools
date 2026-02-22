@@ -137,6 +137,14 @@ extern const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX];
 	 (c) == KSMBD_SHARE_CONF_HOSTS_ALLOW || \
 	 (c) == KSMBD_SHARE_CONF_HOSTS_DENY)
 
+#ifdef CONFIG_KSMBD_FRUIT
+#define KSMBD_SHARE_CONF_IS_FRUIT(c) 0
+#else
+#define KSMBD_SHARE_CONF_IS_FRUIT(c) \
+	((c) >= KSMBD_SHARE_CONF_FRUIT_TIME_MACHINE && \
+	 (c) <= KSMBD_SHARE_CONF_TIME_MACHINE_MAX_SIZE)
+#endif
+
 int shm_share_name(char *name, char *p);
 int shm_share_config(const char *k, enum KSMBD_SHARE_CONF c);
 

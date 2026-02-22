@@ -90,6 +90,31 @@ But this option does not allow to follow a symbolic link to /etc/passwd in their
 
 Default: \fBfollow symlinks = no\fR
 .TP
+\fBfruit finder info\fR (S)
+Store and serve macOS Finder metadata (file type, creator codes, label colors) as extended attributes.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit finder info = no\fR
+.TP
+\fBfruit max access\fR (S)
+Report maximum access permissions for macOS Finder compatibility.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit max access = no\fR
+.TP
+\fBfruit rfork size\fR (S)
+Report resource fork sizes for macOS compatibility.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit rfork size = no\fR
+.TP
+\fBfruit time machine\fR (S)
+Share is a macOS Time Machine backup target.
+When enabled, the share advertises itself as a Time Machine volume.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit time machine = no\fR
+.TP
 \fBforce create mode\fR (S)
 Octal bitmask that gets bitwise ORed after the bitmask given with \fBcreate mask\fR is applied.
 
@@ -110,6 +135,40 @@ System user that all users connected to the share are mapped to.
 With \fBforce group = \fR, primary group of the system user is the respective system group.
 
 Default: \fBforce user = \fR
+.TP
+\fBfruit copyfile\fR (G)
+Support server-side file copy for macOS clients.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit copyfile = no\fR
+.TP
+\fBfruit extensions\fR (G)
+Enable Apple Fruit SMB extensions for macOS compatibility.
+Provides support for macOS-specific features including Finder metadata,
+resource forks, and Time Machine backups.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit extensions = no\fR
+.TP
+\fBfruit model\fR (G)
+Device model string advertised to macOS clients for icon selection.
+Common values: \fBMacSamba\fR, \fBTimeCapsule6,116\fR, \fBRackMac\fR.
+With \fBfruit model = \fR, no model string is advertised.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit model = \fR
+.TP
+\fBfruit nfs aces\fR (G)
+Support NFS-style ACEs in macOS Fruit SMB extensions.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit nfs aces = no\fR
+.TP
+\fBfruit zero fileid\fR (G)
+Return zero file IDs for dot files (macOS hidden file compatibility).
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBfruit zero fileid = no\fR
 .TP
 \fBguest account\fR (G)
 User that does not require a password when connecting to any share with \fBguest ok = yes\fR.
@@ -363,6 +422,14 @@ Default: \fBstore dos attributes = yes\fR
 TCP port that is listened to.
 
 Default: \fBtcp port = 445\fR
+.TP
+\fBtime machine max size\fR (S)
+Maximum size in bytes for Time Machine backups on this share.
+With \fBtime machine max size = 0\fR, no limit is enforced.
+Number suffixes are allowed.
+For the parameter to take effect, \fBksmbd.mountd\fR must be built with fruit support.
+
+Default: \fBtime machine max size = 0\fR
 .TP
 \fBvalid users\fR (S)
 List of the users that are allowed to connect to the share.

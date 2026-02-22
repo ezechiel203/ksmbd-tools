@@ -24,6 +24,16 @@
 #include "linux/ksmbd_server.h"
 #include "share_admin.h"
 
+#ifdef CONFIG_KSMBD_FRUIT
+enum {
+	OPT_FRUIT_TIME_MACHINE = 256,
+	OPT_FRUIT_FINDER_INFO,
+	OPT_FRUIT_RFORK_SIZE,
+	OPT_FRUIT_MAX_ACCESS,
+	OPT_TIME_MACHINE_MAX_SIZE,
+};
+#endif
+
 static void usage(int status)
 {
 	printf(
@@ -50,6 +60,15 @@ static void usage(int status)
 			"  -v, --verbose        be verbose\n"
 			"  -V, --version        output version information and exit\n"
 			"  -h, --help           display this help and exit\n"
+#ifdef CONFIG_KSMBD_FRUIT
+			"\n"
+			"Apple/macOS (Fruit) share options:\n"
+			"      --fruit-time-machine=BOOL   enable Time Machine support\n"
+			"      --fruit-finder-info=BOOL    enable Finder metadata\n"
+			"      --fruit-rfork-size=BOOL     enable resource fork size\n"
+			"      --fruit-max-access=BOOL     enable max access mode\n"
+			"      --time-machine-max-size=SIZE max backup size (0=unlimited)\n"
+#endif
 			"\n"
 			"See ksmbd.addshare(8) for more details.\n");
 }
@@ -64,6 +83,13 @@ static const struct option opts[] = {
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
+#ifdef CONFIG_KSMBD_FRUIT
+	{"fruit-time-machine",	required_argument,	NULL,	OPT_FRUIT_TIME_MACHINE },
+	{"fruit-finder-info",	required_argument,	NULL,	OPT_FRUIT_FINDER_INFO },
+	{"fruit-rfork-size",	required_argument,	NULL,	OPT_FRUIT_RFORK_SIZE },
+	{"fruit-max-access",	required_argument,	NULL,	OPT_FRUIT_MAX_ACCESS },
+	{"time-machine-max-size", required_argument,	NULL,	OPT_TIME_MACHINE_MAX_SIZE },
+#endif
 	{NULL,			0,			NULL,	 0  }
 };
 
@@ -102,6 +128,29 @@ int addshare_main(int argc, char **argv)
 		case 'v':
 			set_log_level(PR_DEBUG);
 			break;
+
+#ifdef CONFIG_KSMBD_FRUIT
+		case OPT_FRUIT_TIME_MACHINE:
+			gptrarray_printf(__options,
+					 "fruit time machine = %s", optarg);
+			break;
+		case OPT_FRUIT_FINDER_INFO:
+			gptrarray_printf(__options,
+					 "fruit finder info = %s", optarg);
+			break;
+		case OPT_FRUIT_RFORK_SIZE:
+			gptrarray_printf(__options,
+					 "fruit rfork size = %s", optarg);
+			break;
+		case OPT_FRUIT_MAX_ACCESS:
+			gptrarray_printf(__options,
+					 "fruit max access = %s", optarg);
+			break;
+		case OPT_TIME_MACHINE_MAX_SIZE:
+			gptrarray_printf(__options,
+					 "time machine max size = %s", optarg);
+			break;
+#endif
 		case 'V':
 			ret = show_version();
 			goto out;
