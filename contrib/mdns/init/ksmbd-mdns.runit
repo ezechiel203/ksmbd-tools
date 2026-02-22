@@ -1,0 +1,4 @@
+#!/bin/sh
+# ksmbd-mdns runit run script
+# Install to /etc/sv/ksmbd-mdns/run
+exec /usr/lib/ksmbd/ksmbd-mdns-hook --foreground

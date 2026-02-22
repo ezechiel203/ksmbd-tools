@@ -1,0 +1,30 @@
+#!/sbin/openrc-run
+# ksmbd-mdns — mDNS/DNS-SD service advertisement for ksmbd
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+description="ksmbd mDNS/DNS-SD service advertisement"
+
+HOOK="/usr/lib/ksmbd/ksmbd-mdns-hook"
+
+depend() {
+    need ksmbd net
+    after avahi-daemon
+}
+
+start() {
+    ebegin "Starting ksmbd mDNS advertisement"
+    "$HOOK"
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping ksmbd mDNS advertisement"
+    "$HOOK" --stop
+    eend $?
+}
+
+reload() {
+    ebegin "Reloading ksmbd mDNS advertisement"
+    "$HOOK"
+    eend $?
+}

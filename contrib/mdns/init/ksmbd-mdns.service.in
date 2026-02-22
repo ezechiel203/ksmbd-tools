@@ -1,0 +1,16 @@
+[Unit]
+Description=ksmbd mDNS/DNS-SD service advertisement
+Documentation=man:ksmbd-mdns(8)
+After=network-online.target ksmbd.service
+Wants=network-online.target
+BindsTo=ksmbd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@libdir@/ksmbd/ksmbd-mdns-hook
+ExecReload=@libdir@/ksmbd/ksmbd-mdns-hook
+ExecStop=@libdir@/ksmbd/ksmbd-mdns-hook --stop
+
+[Install]
+WantedBy=ksmbd.service

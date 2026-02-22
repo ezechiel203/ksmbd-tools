@@ -1,0 +1,50 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          ksmbd-mdns
+# Required-Start:    ksmbd $network
+# Required-Stop:     ksmbd $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: ksmbd mDNS/DNS-SD service advertisement
+# Description:       Manages Bonjour/DNS-SD advertisement for ksmbd file shares
+### END INIT INFO
+
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+HOOK="/usr/lib/ksmbd/ksmbd-mdns-hook"
+NAME="ksmbd-mdns"
+
+case "$1" in
+    start)
+        echo "Starting $NAME..."
+        "$HOOK" && echo "done." || echo "failed."
+        ;;
+    stop)
+        echo "Stopping $NAME..."
+        "$HOOK" --stop && echo "done." || echo "failed."
+        ;;
+    reload|force-reload)
+        echo "Reloading $NAME..."
+        "$HOOK" && echo "done." || echo "failed."
+        ;;
+    restart)
+        "$0" stop
+        "$0" start
+        ;;
+    status)
+        if [ -x "/usr/sbin/ksmbd-mdns" ]; then
+            /usr/sbin/ksmbd-mdns detect
+        elif [ -x "/usr/lib/ksmbd/ksmbd-mdns-detect" ]; then
+            /usr/lib/ksmbd/ksmbd-mdns-detect
+        else
+            echo "$NAME: detection script not found"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|reload|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit 0
