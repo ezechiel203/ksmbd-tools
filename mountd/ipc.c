@@ -176,6 +176,11 @@ static int ipc_ksmbd_starting_up(void)
 			global_conf.work_group,
 			sizeof(ev->work_group) - 1);
 	}
+	if (global_conf.fruit_model) {
+		strncpy(ev->fruit_model,
+			global_conf.fruit_model,
+			sizeof(ev->fruit_model) - 1);
+	}
 
 	if (ifc_list_sz) {
 		char *config_payload = KSMBD_STARTUP_CONFIG_INTERFACES(ev);
@@ -229,7 +234,7 @@ int ipc_process_event(void)
 	return ret;
 }
 
-static struct nla_policy ksmbd_nl_policy[KSMBD_EVENT_MAX] = {
+static struct nla_policy ksmbd_nl_policy[__KSMBD_EVENT_MAX] = {
 	[KSMBD_EVENT_UNSPEC] = {
 		.minlen = 0,
 	},

@@ -483,21 +483,21 @@ static int process_global_conf_kv(GHashTable *kv)
 		switch (cp_get_group_kv_config_opt(v)) {
 		case KSMBD_CONFIG_OPT_DISABLED:
 			global_conf.flags |=
-				KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
+				KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF;
 			global_conf.flags &=
-				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
+				~KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION;
 			break;
 		case KSMBD_CONFIG_OPT_MANDATORY:
 			global_conf.flags |=
-				KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
+				KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION;
 			global_conf.flags &=
-				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
+				~KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF;
 			break;
 		default:
 			global_conf.flags &=
-				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
+				~KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION;
 			global_conf.flags &=
-				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
+				~KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF;
 			break;
 		}
 	}
@@ -546,10 +546,50 @@ static int process_global_conf_kv(GHashTable *kv)
 	if (group_kv_steal(kv, "durable handles", &k, &v)) {
 		if (cp_get_group_kv_bool(v))
 			global_conf.flags |=
-				KSMBD_GLOBAL_FLAG_DURABLE_HANDLES;
+				KSMBD_GLOBAL_FLAG_DURABLE_HANDLE;
 		else
 			global_conf.flags &=
-				~KSMBD_GLOBAL_FLAG_DURABLE_HANDLES;
+				~KSMBD_GLOBAL_FLAG_DURABLE_HANDLE;
+	}
+
+	if (group_kv_steal(kv, "fruit extensions", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_EXTENSIONS;
+	}
+
+	if (group_kv_steal(kv, "fruit model", &k, &v)) {
+		global_conf.fruit_model = cp_get_group_kv_string(v);
+	}
+
+	if (group_kv_steal(kv, "fruit zero file id", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_ZERO_FILEID;
+	}
+
+	if (group_kv_steal(kv, "fruit nfs aces", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_NFS_ACES;
+	}
+
+	if (group_kv_steal(kv, "fruit copyfile", &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE;
+		else
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE;
 	}
 
 	if (group_kv_steal(kv, "max ip connections", &k, &v)) {
@@ -578,6 +618,9 @@ static void add_group_global_conf(void)
 	add_group_key_value("share:fake_fscaps = 64"); /* sparse files */
 	add_group_key_value("tcp port = 445");
 	add_group_key_value("workgroup = WORKGROUP");
+	add_group_key_value("fruit extensions = yes");
+	add_group_key_value("fruit model = Xserve");
+	add_group_key_value("fruit zero file id = yes");
 	add_group_key_value("server signing = auto");
 }
 
