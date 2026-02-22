@@ -48,6 +48,14 @@ make %{?_smp_mflags}
 %install
 %make_install
 
+%post
+/usr/lib/ksmbd/ksmbd-mdns-postinstall || true
+
+%preun
+if [ "$1" -eq 0 ]; then
+    /usr/sbin/ksmbd-mdns remove 2>/dev/null || true
+fi
+
 %files
 %{_sbindir}/ksmbd.addshare
 %{_sbindir}/ksmbd.adduser
@@ -62,5 +70,19 @@ make %{?_smp_mflags}
 %{_mandir}/man5/ksmbdpwd.db.5*
 %{_sysconfdir}/ksmbd/ksmbd.conf.example
 %{_unitdir}/ksmbd.service
+%{_sbindir}/ksmbd-mdns
+%dir %{_libdir}/ksmbd
+%{_libdir}/ksmbd/ksmbd-mdns-lib.sh
+%{_libdir}/ksmbd/ksmbd-mdns-detect
+%{_libdir}/ksmbd/ksmbd-mdns-configure
+%{_libdir}/ksmbd/ksmbd-mdns-hook
+%{_libdir}/ksmbd/ksmbd-mdns-postinstall
+%{_unitdir}/ksmbd-mdns.service
+%dir %{_datadir}/ksmbd/templates
+%{_datadir}/ksmbd/templates/*
+%dir %attr(0755,root,root) /var/lib/ksmbd
+%ghost /var/lib/ksmbd/shares.uuid
+%ghost /var/lib/ksmbd/shares.cache
+%ghost /var/lib/ksmbd/mdns.state
 
 %changelog
