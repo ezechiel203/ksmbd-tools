@@ -1,0 +1,103 @@
+#!/bin/sh
+# ksmbd-mdns-postinstall — First-time mDNS setup for ksmbd.
+# Called by package managers (%post / postinst).
+# MUST ALWAYS EXIT 0 — never fail the package install.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "/usr/lib/ksmbd/ksmbd-mdns-lib.sh" ]; then
+    . "/usr/lib/ksmbd/ksmbd-mdns-lib.sh"
+elif [ -f "$SCRIPT_DIR/ksmbd-mdns-lib.sh" ]; then
+    . "$SCRIPT_DIR/ksmbd-mdns-lib.sh"
+else
+    echo "ksmbd-mdns-postinstall: library not found, skipping mDNS setup." >&2
+    exit 0
+fi
+
+# Always exit 0
+trap 'exit 0' EXIT
+
+# ── Step 1: Create state directory ────────────────────────────
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+mkdir -p "$BACKUP_DIR" 2>/dev/null || true
+
+# ── Step 2: Generate UUID if missing ─────────────────────────
+ensure_state_dir
+if [ "$STATELESS" -eq 0 ]; then
+    ensure_uuid
+fi
+
+# ── Step 3: Read ksmbd.conf ──────────────────────────────────
+CONF=""
+if [ -f /etc/ksmbd/ksmbd.conf ]; then
+    CONF=/etc/ksmbd/ksmbd.conf
+elif [ -f /etc/ksmbd.conf ]; then
+    CONF=/etc/ksmbd.conf
+fi
+
+if [ -z "$CONF" ]; then
+    log_info "ksmbd.conf not found. mDNS will be configured when ksmbd is set up."
+    exit 0
+fi
+
+parse_ksmbd_conf "$CONF"
+
+# ── Step 4: Check mdns bonjour setting ───────────────────────
+case "$MDNS_BONJOUR_OPT" in
+    no|false|0|disabled)
+        log_info "mdns bonjour = no. Skipping mDNS setup."
+        exit 0
+        ;;
+esac
+
+# ── Step 5: Detect backend ───────────────────────────────────
+DETECT_CMD=""
+if [ -x "/usr/lib/ksmbd/ksmbd-mdns-detect" ]; then
+    DETECT_CMD="/usr/lib/ksmbd/ksmbd-mdns-detect"
+elif [ -x "$SCRIPT_DIR/ksmbd-mdns-detect" ]; then
+    DETECT_CMD="$SCRIPT_DIR/ksmbd-mdns-detect"
+fi
+
+if [ -z "$DETECT_CMD" ]; then
+    log_warn "ksmbd-mdns-detect not found. Skipping mDNS setup."
+    exit 0
+fi
+
+eval "$("$DETECT_CMD")"
+
+if [ "$MDNS_BACKEND" = "none" ]; then
+    case "$MDNS_BONJOUR_OPT" in
+        yes|true|1|enabled)
+            log_warn "mdns bonjour = yes but no mDNS daemon found."
+            log_warn "Install avahi-daemon or enable systemd-resolved MulticastDNS."
+            ;;
+        *)
+            log_info "No mDNS daemon detected. mDNS advertising not configured."
+            ;;
+    esac
+    exit 0
+fi
+
+log_info "Detected mDNS backend: $MDNS_BACKEND"
+
+# ── Step 6: Configure ────────────────────────────────────────
+CONFIGURE_CMD=""
+if [ -x "/usr/lib/ksmbd/ksmbd-mdns-configure" ]; then
+    CONFIGURE_CMD="/usr/lib/ksmbd/ksmbd-mdns-configure"
+elif [ -x "$SCRIPT_DIR/ksmbd-mdns-configure" ]; then
+    CONFIGURE_CMD="$SCRIPT_DIR/ksmbd-mdns-configure"
+fi
+
+if [ -n "$CONFIGURE_CMD" ]; then
+    "$CONFIGURE_CMD" "$CONF" || log_warn "Configuration failed (non-fatal)."
+fi
+
+# ── Step 7: Enable the ksmbd-mdns service ────────────────────
+enable_service "ksmbd-mdns" || log_warn "Could not enable ksmbd-mdns service (non-fatal)."
+
+# If ksmbd is running, start mDNS now
+if is_service_running "ksmbd"; then
+    reload_service "ksmbd-mdns" "start" || log_warn "Could not start ksmbd-mdns (non-fatal)."
+fi
+
+log_info "mDNS post-install complete. Backend: $MDNS_BACKEND"
