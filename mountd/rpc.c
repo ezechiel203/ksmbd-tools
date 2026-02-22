@@ -996,7 +996,8 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 			goto fail;
 		}
 
-		__dcerpc_read_syntax(dce, &ctx->abstract_syntax);
+		if (__dcerpc_read_syntax(dce, &ctx->abstract_syntax))
+			goto fail;
 
 		ctx->transfer_syntaxes = g_try_malloc0_n(ctx->num_syntaxes,
 						sizeof(struct dcerpc_syntax));
@@ -1005,8 +1006,10 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 			goto fail;
 		}
 
-		for (j = 0; j < ctx->num_syntaxes; j++)
-			__dcerpc_read_syntax(dce, &ctx->transfer_syntaxes[j]);
+		for (j = 0; j < ctx->num_syntaxes; j++) {
+			if (__dcerpc_read_syntax(dce, &ctx->transfer_syntaxes[j]))
+				goto fail;
+		}
 	}
 	return KSMBD_RPC_OK;
 
@@ -1233,6 +1236,9 @@ int rpc_ioctl_request(struct ksmbd_rpc_command *req,
 		      int max_resp_sz)
 {
 	int ret;
+
+	if (req->payload_sz < sizeof(struct dcerpc_header))
+		return KSMBD_RPC_EBAD_DATA;
 
 	ret = rpc_write_request(req, resp);
 	if (ret == KSMBD_RPC_OK)
