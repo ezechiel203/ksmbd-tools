@@ -1,0 +1,391 @@
+#!/bin/sh
+# ksmbd-mdns-configure — Generate mDNS config files from ksmbd.conf.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "/usr/lib/ksmbd/ksmbd-mdns-lib.sh" ]; then
+    . "/usr/lib/ksmbd/ksmbd-mdns-lib.sh"
+elif [ -f "$SCRIPT_DIR/ksmbd-mdns-lib.sh" ]; then
+    . "$SCRIPT_DIR/ksmbd-mdns-lib.sh"
+else
+    echo "Error: ksmbd-mdns-lib.sh not found" >&2; exit 1
+fi
+
+# Resolve path to ksmbd-mdns-detect
+if [ -x "/usr/lib/ksmbd/ksmbd-mdns-detect" ]; then
+    DETECT_CMD="/usr/lib/ksmbd/ksmbd-mdns-detect"
+elif [ -x "$SCRIPT_DIR/ksmbd-mdns-detect" ]; then
+    DETECT_CMD="$SCRIPT_DIR/ksmbd-mdns-detect"
+else
+    DETECT_CMD="ksmbd-mdns-detect"
+fi
+
+# ── Defaults ──────────────────────────────────────────────────
+CONF=""
+FROM_HOOK=0
+REMOVE=0
+
+# Template dir: try installed path, then dev path
+if [ -d "/usr/share/ksmbd/templates" ]; then
+    TMPL_DIR="/usr/share/ksmbd/templates"
+elif [ -d "$SCRIPT_DIR/templates" ]; then
+    TMPL_DIR="$SCRIPT_DIR/templates"
+else
+    TMPL_DIR=""
+fi
+
+# ── Parse arguments ───────────────────────────────────────────
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --conf=*)     CONF="${1#--conf=}" ;;
+        --dry-run)    DRY_RUN=1 ;;
+        --verbose)    VERBOSE=1 ;;
+        --force)      FORCE=1 ;;
+        --from-hook)  FROM_HOOK=1 ;;
+        --remove)     REMOVE=1 ;;
+        -*)           log_error "Unknown option: $1"; exit 1 ;;
+        *)            CONF="$1" ;;
+    esac
+    shift
+done
+
+# Default config path
+if [ -z "$CONF" ] && [ "$REMOVE" -eq 0 ]; then
+    if [ -f /etc/ksmbd/ksmbd.conf ]; then
+        CONF=/etc/ksmbd/ksmbd.conf
+    elif [ -f /etc/ksmbd.conf ]; then
+        CONF=/etc/ksmbd.conf
+    else
+        log_error "ksmbd.conf not found. Pass --conf=PATH"
+        exit 1
+    fi
+fi
+
+# ── State setup ───────────────────────────────────────────────
+ensure_state_dir
+acquire_lock
+
+# ── Remove mode ───────────────────────────────────────────────
+if [ "$REMOVE" -eq 1 ]; then
+    log_info "Removing all ksmbd mDNS configuration..."
+
+    # Avahi
+    remove_file "/etc/avahi/services/ksmbd-smb.service"
+    remove_file "/etc/avahi/services/ksmbd-timemachine.service"
+
+    # systemd-resolved
+    remove_file "/etc/systemd/dnssd/ksmbd-smb.dnssd"
+    remove_file "/etc/systemd/dnssd/ksmbd-adisk.dnssd"
+    remove_file "/etc/systemd/resolved.conf.d/ksmbd-mdns.conf"
+    remove_file "/etc/systemd/network/10-ksmbd-mdns.network"
+    remove_file "/etc/NetworkManager/conf.d/ksmbd-mdns.conf"
+
+    # troglobit/mdnsd
+    remove_file "/etc/mdns.d/ksmbd-smb.service"
+    remove_file "/etc/mdns.d/ksmbd-adisk.service"
+
+    # mDNSResponder wrapper
+    remove_file "/usr/local/lib/ksmbd/ksmbd-mdns-register"
+
+    # State files
+    remove_file "$STATE_FILE"
+    remove_file "$CACHE_FILE"
+
+    log_info "Done."
+    exit 0
+fi
+
+# ── Parse ksmbd.conf ─────────────────────────────────────────
+parse_ksmbd_conf "$CONF"
+
+# Check if mDNS is disabled
+case "$MDNS_BONJOUR_OPT" in
+    no|false|0|disabled)
+        log_info "mdns bonjour = no in ksmbd.conf, skipping mDNS configuration."
+        exit 0
+        ;;
+esac
+
+# ── Get detection result ─────────────────────────────────────
+if [ -f "$STATE_FILE" ] && [ "$FROM_HOOK" -eq 1 ] && [ "$FORCE" -eq 0 ]; then
+    . "$STATE_FILE"
+else
+    eval "$("$DETECT_CMD")"
+fi
+
+# Handle forced backend from ksmbd.conf
+if [ "$MDNS_BACKEND_OPT" != "auto" ]; then
+    # Check if the forced backend was detected as installed
+    case ",$MDNS_INSTALLED," in
+        *",$MDNS_BACKEND_OPT,"*)
+            MDNS_BACKEND="$MDNS_BACKEND_OPT"
+            ;;
+        *)
+            log_error "Forced backend '$MDNS_BACKEND_OPT' is not installed."
+            log_error "Installed: ${MDNS_INSTALLED:-none}"
+            exit 1
+            ;;
+    esac
+fi
+
+# No backend available
+if [ "$MDNS_BACKEND" = "none" ]; then
+    case "$MDNS_BONJOUR_OPT" in
+        yes|true|1|enabled)
+            log_warn "mdns bonjour = yes but no mDNS daemon found."
+            log_warn "Install avahi-daemon or enable systemd-resolved MulticastDNS."
+            exit 1
+            ;;
+        *)
+            log_info "No mDNS daemon found. mDNS advertising disabled."
+            exit 0
+            ;;
+    esac
+fi
+
+log_info "Backend: $MDNS_BACKEND"
+log_info "Config:  $CONF"
+log_info "Port:    $PORT"
+log_info "Name:    $NETBIOS_NAME"
+if [ "$TM_COUNT" -gt 0 ]; then
+    log_info "Time Machine shares ($TM_COUNT):$TM_SHARES"
+fi
+
+# ── UUID ──────────────────────────────────────────────────────
+ensure_uuid
+
+# ── Idempotency check ────────────────────────────────────────
+_hash="$(compute_config_hash "$MDNS_BACKEND")"
+if check_cache_current "$_hash"; then
+    log_info "Configuration unchanged (hash matches cache). Nothing to do."
+    exit 0
+fi
+
+# ── Build template variables ─────────────────────────────────
+
+# Service name: for Avahi use %h (wildcard), for resolved use %H, else literal
+case "$MDNS_BACKEND" in
+    avahi)    SVC_NAME="${NETBIOS_NAME}" ;;
+    resolved) SVC_NAME="${NETBIOS_NAME}" ;;
+    *)        SVC_NAME="${NETBIOS_NAME}" ;;
+esac
+
+# Time Machine TXT records (backend-specific formatting)
+TM_TXT=""       # Avahi XML
+TM_TXT_LINES="" # resolved INI
+MDNSD_TM_RECORDS="" # mdnsd plain text
+_dk=0
+for _share in $TM_SHARES; do
+    TM_TXT="${TM_TXT}    <txt-record>dk${_dk}=adVN=${_share},adVF=0x82</txt-record>
+"
+    TM_TXT_LINES="${TM_TXT_LINES}TxtText=dk${_dk}=adVN=${_share},adVF=0x82
+"
+    MDNSD_TM_RECORDS="${MDNSD_TM_RECORDS}txt dk${_dk}=adVN=${_share},adVF=0x82
+"
+    _dk=$((_dk + 1))
+done
+
+# ── Generate configs per backend ─────────────────────────────
+
+case "$MDNS_BACKEND" in
+    avahi)
+        if [ "$TM_COUNT" -gt 0 ]; then
+            if [ -n "$TMPL_DIR" ] && [ -f "$TMPL_DIR/avahi-timemachine.service.in" ]; then
+                _content="$(expand_template "$TMPL_DIR/avahi-timemachine.service.in")"
+            else
+                _content="<?xml version=\"1.0\" standalone='no'?>
+<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">
+<!-- Auto-generated by ksmbd-mdns from $CONF -- do not edit -->
+<service-group>
+  <name replace-wildcards=\"yes\">$SVC_NAME</name>
+  <service>
+    <type>_smb._tcp</type>
+    <port>$PORT</port>
+  </service>
+  <service>
+    <type>_adisk._tcp</type>
+    <port>9</port>
+    <txt-record>sys=adVF=0x82</txt-record>
+$TM_TXT  </service>
+</service-group>"
+            fi
+            backup_file "/etc/avahi/services/ksmbd-timemachine.service"
+            atomic_write "/etc/avahi/services/ksmbd-timemachine.service" "$_content"
+            remove_file "/etc/avahi/services/ksmbd-smb.service"
+        else
+            if [ -n "$TMPL_DIR" ] && [ -f "$TMPL_DIR/avahi-smb.service.in" ]; then
+                _content="$(expand_template "$TMPL_DIR/avahi-smb.service.in")"
+            else
+                _content="<?xml version=\"1.0\" standalone='no'?>
+<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">
+<!-- Auto-generated by ksmbd-mdns from $CONF -- do not edit -->
+<service-group>
+  <name replace-wildcards=\"yes\">$SVC_NAME</name>
+  <service>
+    <type>_smb._tcp</type>
+    <port>$PORT</port>
+  </service>
+</service-group>"
+            fi
+            backup_file "/etc/avahi/services/ksmbd-smb.service"
+            atomic_write "/etc/avahi/services/ksmbd-smb.service" "$_content"
+            remove_file "/etc/avahi/services/ksmbd-timemachine.service"
+        fi
+        ;;
+
+    resolved)
+        # SMB .dnssd
+        _smb_content="# Auto-generated by ksmbd-mdns from $CONF -- do not edit
+[Service]
+Name=$SVC_NAME
+Type=_smb._tcp
+Port=$PORT"
+        backup_file "/etc/systemd/dnssd/ksmbd-smb.dnssd"
+        atomic_write "/etc/systemd/dnssd/ksmbd-smb.dnssd" "$_smb_content"
+
+        # adisk .dnssd (if TM shares)
+        if [ "$TM_COUNT" -gt 0 ]; then
+            _adisk_content="# Auto-generated by ksmbd-mdns from $CONF -- do not edit
+[Service]
+Name=$SVC_NAME
+Type=_adisk._tcp
+Port=9
+TxtText=sys=adVF=0x82
+$TM_TXT_LINES"
+            backup_file "/etc/systemd/dnssd/ksmbd-adisk.dnssd"
+            atomic_write "/etc/systemd/dnssd/ksmbd-adisk.dnssd" "$_adisk_content"
+        else
+            remove_file "/etc/systemd/dnssd/ksmbd-adisk.dnssd"
+        fi
+
+        # Global MulticastDNS activation (resolved.conf.d drop-in)
+        _resolved_dropin="# Auto-generated by ksmbd-mdns -- do not edit
+[Resolve]
+MulticastDNS=yes"
+        backup_file "/etc/systemd/resolved.conf.d/ksmbd-mdns.conf"
+        atomic_write "/etc/systemd/resolved.conf.d/ksmbd-mdns.conf" "$_resolved_dropin"
+
+        # Per-interface activation
+        _iface_match="*"
+        if [ -n "$KSMBD_INTERFACES" ]; then
+            # Convert comma-separated to space-separated for [Match] Name=
+            _iface_match="$(echo "$KSMBD_INTERFACES" | tr ',' ' ')"
+        fi
+
+        if is_service_running "systemd-networkd"; then
+            _networkd_content="# Auto-generated by ksmbd-mdns -- do not edit
+# Low priority (10-) so user .network files take precedence.
+[Match]
+Name=$_iface_match
+
+[Network]
+MulticastDNS=yes"
+            backup_file "/etc/systemd/network/10-ksmbd-mdns.network"
+            atomic_write "/etc/systemd/network/10-ksmbd-mdns.network" "$_networkd_content"
+        fi
+
+        if is_service_running "NetworkManager"; then
+            _nm_content="# Auto-generated by ksmbd-mdns -- do not edit
+[connection]
+connection.mdns=2"
+            backup_file "/etc/NetworkManager/conf.d/ksmbd-mdns.conf"
+            atomic_write "/etc/NetworkManager/conf.d/ksmbd-mdns.conf" "$_nm_content"
+        fi
+
+        # Fallback: runtime-only activation (containers, no networkd/NM)
+        if ! is_service_running "systemd-networkd" && \
+           ! is_service_running "NetworkManager"; then
+            log_info "No networkd/NM detected. Activating mDNS on interfaces at runtime."
+            if [ "$DRY_RUN" -eq 0 ]; then
+                if [ -n "$KSMBD_INTERFACES" ]; then
+                    for _iface in $(echo "$KSMBD_INTERFACES" | tr ',' ' '); do
+                        resolvectl mdns "$_iface" yes 2>/dev/null || true
+                    done
+                else
+                    for _iface_path in /sys/class/net/*; do
+                        _iname="$(basename "$_iface_path")"
+                        [ "$_iname" = "lo" ] && continue
+                        resolvectl mdns "$_iname" yes 2>/dev/null || true
+                    done
+                fi
+            else
+                echo "  Would run: resolvectl mdns <iface> yes (for each interface)"
+            fi
+        fi
+        ;;
+
+    mdnsd)
+        _smb_content="# Auto-generated by ksmbd-mdns from $CONF -- do not edit
+name $SVC_NAME
+type _smb._tcp
+port $PORT"
+        backup_file "/etc/mdns.d/ksmbd-smb.service"
+        atomic_write "/etc/mdns.d/ksmbd-smb.service" "$_smb_content"
+
+        if [ "$TM_COUNT" -gt 0 ]; then
+            _adisk_content="# Auto-generated by ksmbd-mdns from $CONF -- do not edit
+name $SVC_NAME
+type _adisk._tcp
+port 9
+txt sys=adVF=0x82
+$MDNSD_TM_RECORDS"
+            backup_file "/etc/mdns.d/ksmbd-adisk.service"
+            atomic_write "/etc/mdns.d/ksmbd-adisk.service" "$_adisk_content"
+        else
+            remove_file "/etc/mdns.d/ksmbd-adisk.service"
+        fi
+        ;;
+
+    mdnsresponder)
+        # Generate a wrapper script that uses dns-sd
+        _tm_args=""
+        if [ "$TM_COUNT" -gt 0 ]; then
+            _txt_args="\"sys=adVF=0x82\""
+            _dk=0
+            for _share in $TM_SHARES; do
+                _txt_args="$_txt_args \"dk${_dk}=adVN=${_share},adVF=0x82\""
+                _dk=$((_dk + 1))
+            done
+            _tm_args="
+# Register _adisk._tcp (Time Machine discovery)
+dns-sd -R \"$SVC_NAME\" _adisk._tcp . 9 $_txt_args &"
+        fi
+
+        _wrapper="#!/bin/sh
+# Auto-generated by ksmbd-mdns -- do not edit
+# Registers ksmbd services via mDNSResponder dns-sd.
+# This process must stay running — services deregister on exit.
+cleanup() { kill 0; exit; }
+trap cleanup INT TERM
+
+# Register _smb._tcp
+dns-sd -R \"$SVC_NAME\" _smb._tcp . $PORT &
+$_tm_args
+# Wait for all background dns-sd processes
+wait"
+
+        mkdir -p /usr/local/lib/ksmbd 2>/dev/null
+        atomic_write "/usr/local/lib/ksmbd/ksmbd-mdns-register" "$_wrapper"
+        if [ "$DRY_RUN" -eq 0 ]; then
+            chmod +x "/usr/local/lib/ksmbd/ksmbd-mdns-register"
+        fi
+        ;;
+
+    go-mdns|rust-mdns|ksmbd-go-mdns)
+        # These read ksmbd.conf directly or use the shares.cache
+        log_info "Backend $MDNS_BACKEND uses shares.cache for configuration."
+        ;;
+
+    *)
+        log_error "Unknown backend: $MDNS_BACKEND"
+        exit 1
+        ;;
+esac
+
+# ── Write state and cache ────────────────────────────────────
+write_state "$MDNS_BACKEND"
+write_cache "$MDNS_BACKEND" "$_hash"
+
+log_info "Configuration complete."
