@@ -31,6 +31,13 @@ systemd_dep = dependency(
   required: false,
   version: '>= 245',
 )
+libsystemd_dep = dependency(
+  'libsystemd',
+  required: false,
+)
+if libsystemd_dep.found()
+  add_project_arguments('-DHAVE_SYSTEMD', language: 'c')
+endif
 krb5_dep = dependency(
   get_option('krb5_name'),
   required: get_option('krb5'),

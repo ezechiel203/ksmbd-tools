@@ -23,6 +23,10 @@
 #include "management/share.h"
 #include "config_parser.h"
 
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
+
 static void usage(int status)
 {
 	printf(
@@ -261,6 +265,10 @@ static int worker_init(void)
 	ret = load_config(global_conf.pwddb, global_conf.smbconf);
 	if (ret)
 		goto out;
+
+#ifdef HAVE_SYSTEMD
+	sd_notify(0, "READY=1");
+#endif
 
 	for (;;) {
 		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
