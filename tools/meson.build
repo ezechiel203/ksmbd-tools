@@ -15,8 +15,8 @@ if krb5_dep.found()
   ]
 endif
 
-executable(
-  'ksmbd.tools',
+tools_lib = static_library(
+  'tools',
   ksmbd_tools_files,
   include_directories: include_dirs,
   c_args: [
@@ -29,7 +29,21 @@ executable(
     asn1_lib,
     pthread_lib,
   ],
+)
+
+executable(
+  'ksmbd.tools',
+  'main.c',
+  include_directories: include_dirs,
+  c_args: [
+    '-DSYSCONFDIR="@0@"'.format(get_option('prefix') / get_option('sysconfdir')),
+    '-DRUNSTATEDIR="@0@"'.format(runstatedir),
+  ],
+  dependencies: [
+    glib_dep,
+  ],
   link_with: [
+    tools_lib,
     addshare_lib,
     adduser_lib,
     control_lib,
