@@ -57,6 +57,12 @@ Description of the share as seen in a net view and and in the browse list.
 
 Default: \fBcomment = \fR
 .TP
+\fBcontinuous availability\fR (S)
+Enable SMB continuous availability for this share.
+When enabled, clients may request persistent handles that survive brief server outages or share reconnections.
+
+Default: \fBcontinuous availability = no\fR
+.TP
 \fBcreate mask\fR (S)
 Octal bitmask that gets bitwise ANDed with DOS-to-UNIX-mapped permissions when creating a file.
 
@@ -281,7 +287,7 @@ Maximum number of simultaneous connections to the server.
 With \fBmax connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
 Number suffixes are allowed.
 
-Default: \fBmax connections = 128\fR
+Default: \fBmax connections = 256\fR
 .TP
 \fBmax connections\fR (S)
 Maximum number of simultaneous connections to the share.
@@ -295,12 +301,18 @@ Maximum number of connections to the server per IP address.
 With \fBmax ip connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
 Number suffixes are allowed.
 
-Default: \fBmax ip connections = 8\fR
+Default: \fBmax ip connections = 32\fR
 .TP
 \fBmax open files\fR (G)
 Maximum number of simultaneous open files for a client.
 
 Default: \fBmax open files = 10000\fR
+.TP
+\fBmax worker threads\fR (G)
+Number of IPC worker threads used by \fBksmbd.mountd\fR for handling kernel requests.
+Increasing this value may improve performance under heavy concurrent load.
+
+Default: \fBmax worker threads = 4\fR
 .TP
 \fBnetbios name\fR (G)
 NetBIOS name.
