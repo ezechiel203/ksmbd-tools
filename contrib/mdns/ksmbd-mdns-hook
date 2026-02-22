@@ -1,0 +1,107 @@
+#!/bin/sh
+# ksmbd-mdns-hook — Called on ksmbd start/reload to update mDNS advertisements.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "/usr/lib/ksmbd/ksmbd-mdns-lib.sh" ]; then
+    . "/usr/lib/ksmbd/ksmbd-mdns-lib.sh"
+elif [ -f "$SCRIPT_DIR/ksmbd-mdns-lib.sh" ]; then
+    . "$SCRIPT_DIR/ksmbd-mdns-lib.sh"
+else
+    echo "Error: ksmbd-mdns-lib.sh not found" >&2; exit 1
+fi
+
+# ── Parse arguments ───────────────────────────────────────────
+STOP=0
+FOREGROUND=0
+CONF=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --stop)       STOP=1 ;;
+        --foreground) FOREGROUND=1 ;;
+        --conf=*)     CONF="${1#--conf=}" ;;
+        -*)           ;; # ignore unknown (forward compat)
+        *)            CONF="$1" ;;
+    esac
+    shift
+done
+
+# Default config
+if [ -z "$CONF" ]; then
+    if [ -f /etc/ksmbd/ksmbd.conf ]; then
+        CONF=/etc/ksmbd/ksmbd.conf
+    elif [ -f /etc/ksmbd.conf ]; then
+        CONF=/etc/ksmbd.conf
+    fi
+fi
+
+# ── Stop mode ─────────────────────────────────────────────────
+if [ "$STOP" -eq 1 ]; then
+    # Optional: kill runtime registrations (avahi-publish-service, etc.)
+    if [ -f /var/run/ksmbd-mdns-avahi.pid ]; then
+        while read -r _pid; do
+            kill "$_pid" 2>/dev/null || true
+        done < /var/run/ksmbd-mdns-avahi.pid
+        rm -f /var/run/ksmbd-mdns-avahi.pid
+    fi
+    log_info "mDNS hook stopped."
+    exit 0
+fi
+
+# ── Network readiness (with retry for non-systemd) ───────────
+_retries=0
+_max_retries=3
+while ! check_network_ready; do
+    _retries=$((_retries + 1))
+    if [ "$_retries" -gt "$_max_retries" ]; then
+        log_warn "Network not ready after ${_max_retries} retries. Proceeding anyway."
+        break
+    fi
+    log_verbose "Network not ready, waiting... (attempt $_retries/$_max_retries)"
+    sleep 5
+done
+
+# ── Detect + configure + reload ──────────────────────────────
+ensure_state_dir
+
+# Source cached state or re-detect
+if [ -f "$STATE_FILE" ]; then
+    . "$STATE_FILE"
+else
+    eval "$(ksmbd-mdns-detect)"
+    write_state "$MDNS_BACKEND"
+fi
+
+# Exit silently if no backend
+if [ "$MDNS_BACKEND" = "none" ]; then
+    log_verbose "No mDNS backend configured. Exiting."
+    exit 0
+fi
+
+# Configure (skips if unchanged due to hash caching)
+if [ -n "$CONF" ] && [ -f "$CONF" ]; then
+    ksmbd-mdns-configure --from-hook "$CONF" || {
+        log_warn "ksmbd-mdns-configure failed (exit $?). mDNS may not be updated."
+    }
+fi
+
+# Reload the backend
+reload_mdns_backend "$MDNS_BACKEND" || {
+    log_warn "Backend reload failed. mDNS daemon may need manual restart."
+}
+
+log_info "mDNS hook completed. Backend: $MDNS_BACKEND"
+
+# ── Foreground mode (for runit) ──────────────────────────────
+if [ "$FOREGROUND" -eq 1 ]; then
+    log_info "Foreground mode: waiting for signals (SIGHUP=reload, SIGTERM=stop)..."
+    trap 'exec "$0" --conf="$CONF"' HUP
+    trap 'exec "$0" --stop' TERM
+    while true; do
+        sleep 86400 &
+        wait $! || true
+    done
+fi
