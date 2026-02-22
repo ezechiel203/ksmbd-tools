@@ -66,6 +66,11 @@ static const char *__defconf_fmt[KSMBD_SHARE_CONF_MAX] = {
 	"; list of vfs objects to overload io ops with [%s]",
 	"; users have read-write access [%s]",
 /*30*/	"; path lookup can cross mountpoints [%s]",
+	"; enable Apple Time Machine support [%s]",
+	"; max size for Time Machine backups in bytes [%s]",
+	"; expose Finder info in readdir responses [%s]",
+	"; expose resource fork sizes in readdir responses [%s]",
+/*35*/	"; expose max access in readdir responses [%s]",
 };
 
 static char **__get_options(GHashTable *kv, int is_global)

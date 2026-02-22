@@ -90,6 +90,87 @@ But this option does not allow to follow a symbolic link to /etc/passwd in their
 
 Default: \fBfollow symlinks = no\fR
 .TP
+\fBfruit copyfile\fR (G)
+Advertise server-side copy support (SUPPORTS_OSX_COPYFILE) to macOS clients
+during AAPL negotiation. When enabled, macOS may use server-side copy
+operations instead of read/write copy loops.
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit copyfile = no\fR
+.TP
+\fBfruit extensions\fR (G)
+Enable Apple (Fruit) SMB extensions for macOS client compatibility.
+When enabled, the server responds to AAPL create contexts from macOS clients
+with negotiated capabilities such as enriched directory listings, zero file
+IDs, and model information. Has no effect on non-Apple clients.
+
+Default: \fBfruit extensions = yes\fR
+.TP
+\fBfruit finder info\fR (S)
+Expose Finder information in enriched directory listing responses.
+When enabled, macOS Finder metadata (type codes, creator codes, flags,
+location) is included in directory enumeration results, allowing Finder
+to display files with correct icons and attributes without extra round-trips.
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit finder info = yes\fR
+.TP
+\fBfruit max access\fR (S)
+Expose maximum access permissions in enriched directory listing responses.
+When enabled, the maximum access rights for each file are included in
+directory enumeration results, allowing macOS to display correct
+permission indicators without additional queries.
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit max access = yes\fR
+.TP
+\fBfruit model\fR (G)
+String identifying the server model shown in the macOS Finder sidebar icon.
+Common values: Xserve, PowerBook, PowerMac, Macmini, iMac, MacBook,
+MacBookPro, MacBookAir, MacPro, AppleTV1,1, AirPort, RackMac.
+
+Default: \fBfruit model = Xserve\fR
+.TP
+\fBfruit nfs aces\fR (G)
+Include synthetic NFS ACE entries that encode UNIX mode, UID, and GID
+when returning ACLs to macOS clients. Uses well-known SIDs
+S-1-5-88-1 (mode), S-1-5-88-2 (UID), S-1-5-88-3 (GID).
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit nfs aces = no\fR
+.TP
+\fBfruit resource fork size\fR (S)
+Expose resource fork sizes in enriched directory listing responses.
+When enabled, the size of each file's resource fork is included in
+directory enumeration results.
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit resource fork size = no\fR
+.TP
+\fBfruit time machine\fR (S)
+Mark this share as a Time Machine backup target.
+When enabled, macOS will discover this share as available for
+Time Machine backups. The server will advertise full-sync support
+and handle Time Machine-specific operations.
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit time machine = no\fR
+.TP
+\fBfruit time machine max size\fR (S)
+Maximum size in bytes that Time Machine may use on this share.
+A value of 0 means unlimited.
+Requires \fBfruit time machine = yes\fR to take effect.
+
+Default: \fBfruit time machine max size = 0\fR
+.TP
+\fBfruit zero file id\fR (G)
+Return zero as the file ID for all files when an AAPL-capable client
+is connected. This prevents macOS CNID mismatch issues that can occur
+when Linux recycles inode numbers.
+Requires \fBfruit extensions = yes\fR to take effect.
+
+Default: \fBfruit zero file id = yes\fR
+.TP
 \fBforce create mode\fR (S)
 Octal bitmask that gets bitwise ORed after the bitmask given with \fBcreate mask\fR is applied.
 

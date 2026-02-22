@@ -5,6 +5,11 @@
 	bind interfaces only = no
 	deadtime = 0
 	durable handles = no
+	fruit copyfile = no
+	fruit extensions = yes
+	fruit model = Xserve
+	fruit nfs aces = no
+	fruit zero file id = yes
 	guest account = nobody
 	interfaces = 
 	ipc timeout = 0
@@ -42,6 +47,11 @@
 	crossmnt = yes
 	directory mask = 0755
 	follow symlinks = no
+	fruit finder info = yes
+	fruit max access = yes
+	fruit resource fork size = no
+	fruit time machine = no
+	fruit time machine max size = 0
 	force create mode = 0000
 	force directory mode = 0000
 	force group = 
