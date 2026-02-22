@@ -93,6 +93,13 @@ krb5_error_code krb5_auth_con_getauthenticator(krb5_context, krb5_auth_context, 
   endif
 endif
 
+if get_option('fruit').enabled()
+  config_h_data.set(
+    'CONFIG_KSMBD_FRUIT',
+    true,
+  )
+endif
+
 configure_file(
   output: 'config.h',
   configuration: config_h_data,

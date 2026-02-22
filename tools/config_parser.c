@@ -560,6 +560,7 @@ static int process_global_conf_kv(GHashTable *kv)
 				KSMBD_CONF_MAX_CONNECTIONS;
 	}
 
+#ifdef CONFIG_KSMBD_FRUIT
 	if (group_kv_steal(kv, "fruit extensions", &k, &v)) {
 		if (cp_get_group_kv_bool(v))
 			global_conf.flags |=
@@ -599,6 +600,7 @@ static int process_global_conf_kv(GHashTable *kv)
 	if (group_kv_steal(kv, "fruit model", &k, &v)) {
 		global_conf.fruit_model = cp_get_group_kv_string(v);
 	}
+#endif /* CONFIG_KSMBD_FRUIT */
 
 	if (group_kv_steal(kv, "mdns bonjour", &k, &v)) {
 		if (!cp_key_cmp(v, "yes") || !cp_key_cmp(v, "true") ||

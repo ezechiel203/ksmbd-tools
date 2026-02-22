@@ -769,6 +769,7 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			clear_share_flag(share, KSMBD_SHARE_FLAG_CROSSMNT);
 	}
 
+#ifdef CONFIG_KSMBD_FRUIT
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_FRUIT_TIME_MACHINE, &k, &v)) {
 		if (cp_get_group_kv_bool(v))
 			set_share_flag(share,
@@ -809,6 +810,7 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			   &k, &v)) {
 		share->time_machine_max_size = cp_memparse(v);
 	}
+#endif /* CONFIG_KSMBD_FRUIT */
 
 	return 0;
 }

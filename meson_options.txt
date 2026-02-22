@@ -23,3 +23,10 @@ option(
   value: 'krb5',
   description: 'Dependency name used when checking Kerberos 5 support',
 )
+
+option(
+  'fruit',
+  type: 'feature',
+  value: 'enabled',
+  description: 'Support for Apple Fruit SMB extensions (macOS compatibility)',
+)

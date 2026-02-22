@@ -34,6 +34,15 @@ AC_SUBST([in_script], [[\
         -e "s,[@]ksmbd_tools_version[@],$(ksmbd_tools_version),g"'
                        ]])
 
+AC_ARG_ENABLE([fruit],
+              [AC_HELP_STRING([--enable-fruit], [Enable Apple Fruit SMB extensions for macOS compatibility @<:@default=yes@:>@])],
+              [enable_fruit=$enableval],
+              [enable_fruit=yes])
+
+AS_IF([test "x$enable_fruit" != xno], [
+	AC_DEFINE([CONFIG_KSMBD_FRUIT], [], [Define if Apple Fruit SMB extensions are enabled.])
+])
+
 AC_ARG_ENABLE([krb5],
               [AC_HELP_STRING([--enable-krb5], [Enable Kerberos 5 authentication @<:@default=no@:>@])],
               [enable_krb5=$enableval],
