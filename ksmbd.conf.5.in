@@ -218,14 +218,21 @@ Default: \fBguest ok = no\fR
 Files starting with a dot appear as hidden files.
 
 Default: \fBhide dot files = yes\fR
-.\" .TP
-.\" \fBhosts allow\fR (S)
-.\" 
-.\" Default: \fBhosts allow = \fR
-.\" .TP
-.\" \fBhosts deny\fR (S)
-.\" 
-.\" Default: \fBhosts deny = \fR
+.TP
+\fBhosts allow\fR (S)
+List of hosts that are allowed to connect to the share.
+Supports exact IPv4/IPv6 addresses, CIDR notation (e.g. \fB192.168.1.0/24\fR, \fBfd00::/64\fR), and hostnames.
+With \fBhosts allow = \fR, all hosts are allowed.
+
+Default: \fBhosts allow = \fR
+.TP
+\fBhosts deny\fR (S)
+List of hosts that are denied access to the share.
+Same format as \fBhosts allow\fR.
+A host being in the list has precedence over it being in \fBhosts allow\fR.
+With \fBhosts deny = \fR, no host is denied.
+
+Default: \fBhosts deny = \fR
 .TP
 \fBinherit owner\fR (S)
 Ownership for new files and directories is controlled by the ownership of the parent directory.
@@ -488,7 +495,7 @@ Same effect as \fBwritable\fR.
 
 Default: \fBwrite ok = \fR
 .SH COPYRIGHT
-Copyright \(co 2015-2022 ksmbd-tools contributors.
+Copyright \(co 2015-2026 ksmbd-tools contributors.
 License GPLv2: GNU GPL version 2 <https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>.
 .br
 This is free software: you are free to change and redistribute it.
