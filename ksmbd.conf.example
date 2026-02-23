@@ -1,79 +1,1214 @@
-; see ksmbd.conf(5) for details
+; =========================================================================
+; ksmbd.conf — Configuration file for the ksmbd in-kernel SMB server
+; =========================================================================
+;
+; This file controls ksmbd.mountd (the userspace management daemon) and
+; the ksmbd kernel module. It uses an INI-style format:
+;
+;   [section]
+;       key = value
+;
+; SYNTAX RULES:
+;   - Sections are enclosed in brackets:  [global]  [sharename]
+;   - Parameters use "key = value" pairs, one per line.
+;   - Comments start with ; or # and extend to end of line.
+;   - Boolean values: yes, no, true, false, 1, 0, enable, disable
+;   - Size values accept suffixes: K (KiB), M (MiB), G (GiB), T, P, E
+;   - Lists are separated by commas, spaces, or tabs.
+;   - Group names are prefixed with @:  valid users = alice, @staff
+;   - Octal values for permission masks: 0755, 0644
+;
+; SPECIAL SECTIONS:
+;   [global]  — Server-wide settings. Applies to all shares.
+;   [IPC$]    — Built-in IPC pipe share (created automatically).
+;   [name]    — Each other section defines a file share.
+;
+; RELOADING:
+;   Most settings take effect after:  ksmbd.control --reload
+;   Some require a full daemon restart:  systemctl restart ksmbd
+;
+; See ksmbd.conf(5) for the full manual page.
+;
+; =========================================================================
+
+
+; =========================================================================
+; GLOBAL SECTION
+; =========================================================================
+;
+; The [global] section defines server-wide parameters that affect all
+; shares and the overall behavior of the ksmbd server. These settings
+; control protocol negotiation, authentication, performance tuning,
+; security policies, and macOS integration.
 
 [global]
-	; global parameters
-	bind interfaces only = no
-	deadtime = 0
-	durable handles = no
-	fruit copyfile = no
-	fruit extensions = yes
-	fruit model = Xserve
-	fruit nfs aces = no
-	fruit zero file id = yes
-	guest account = nobody
-	interfaces =
-	ipc timeout = 0
-	kerberos keytab file =
-	kerberos service name =
-	kerberos support = no
-	map to guest = never
-	max active sessions = 1024
-	max connections = 256
-	max ip connections = 32
-	max open files = 10000
-	max worker threads = 4
+
+; ── Identity & Networking ────────────────────────────────────────────────
+
+	; netbios name (string)
+	;
+	; The NetBIOS hostname that this server advertises on the network.
+	; Clients use this name to connect to the server (e.g., \\MYSERVER).
+	; Typically set to the machine's hostname or a short descriptive name.
+	; Maximum 15 characters (NetBIOS limit). Case-insensitive.
+	;
+	; Default: KSMBD SERVER
 	netbios name = KSMBD SERVER
-	restrict anonymous = 0
-	root directory =
-	server max protocol = SMB3_11
-	server min protocol = SMB2_10
-	server multi channel support = no
-	server signing = auto
+
+	; server string (string)
+	;
+	; A free-form description of this server, displayed in network
+	; browsing lists and in the "Server Comment" field of net view.
+	; Informational only — does not affect functionality.
+	;
+	; Default: SMB SERVER
 	server string = SMB SERVER
-	share:fake_fscaps = 0
-	smb2 leases = yes
-	smb2 max credits = 8192
-	smb2 max read = 4194304
-	smb2 max trans = 1048576
-	smb2 max write = 4194304
-	smb3 encryption = auto
-	smbd max io size = 8388608
-	tcp port = 445
+
+	; workgroup (string)
+	;
+	; The Windows workgroup or NT domain name this server belongs to.
+	; Clients in the same workgroup see this server in their network
+	; neighborhood. Must match the workgroup of other machines on the
+	; LAN for proper browsing.
+	;
+	; Default: WORKGROUP
 	workgroup = WORKGROUP
 
-[myshare]
-	; share parameters
+	; tcp port (integer, 1–65535)
+	;
+	; The TCP port ksmbd listens on for SMB connections. The standard
+	; SMB port is 445. Change only if you need to run on an alternate
+	; port (e.g., behind a reverse proxy or alongside another SMB
+	; server). Clients must specify the port explicitly if non-standard.
+	;
+	; Note: Command-line option (-p) overrides this setting.
+	;
+	; Default: 445
+	tcp port = 445
+
+	; bind interfaces only (boolean)
+	;
+	; When set to yes, ksmbd only listens on the network interfaces
+	; listed in the "interfaces" parameter below. When set to no,
+	; ksmbd listens on all available interfaces (0.0.0.0).
+	;
+	; Use this to restrict the server to specific network segments,
+	; for example to prevent SMB traffic on a public-facing interface.
+	;
+	; Default: no
+	bind interfaces only = no
+
+	; interfaces (list of interface names)
+	;
+	; A comma- or space-separated list of network interface names that
+	; ksmbd should listen on. Only effective when "bind interfaces only"
+	; is set to yes. Interface names are OS-level names (e.g., eth0,
+	; ens3, bond0, br0).
+	;
+	; Example: interfaces = eth0, eth1
+	;
+	; Default: (empty — listen on all interfaces)
+	interfaces =
+
+; ── Protocol Negotiation ────────────────────────────────────────────────
+
+	; server min protocol (protocol version string)
+	;
+	; The minimum SMB protocol version that the server will accept
+	; during negotiation. Clients requesting a version below this
+	; will be rejected.
+	;
+	; Valid values:
+	;   SMB1       — SMB 1.0 (legacy, insecure — avoid if possible)
+	;   SMB2_10    — SMB 2.1   (Windows 7 / Server 2008 R2)
+	;   SMB2_20    — SMB 2.0   (Windows Vista / Server 2008)
+	;   SMB2_21    — SMB 2.1   (alias)
+	;   SMB3_00    — SMB 3.0   (Windows 8 / Server 2012)
+	;   SMB3_02    — SMB 3.0.2 (Windows 8.1 / Server 2012 R2)
+	;   SMB3_11    — SMB 3.1.1 (Windows 10 / Server 2016+)
+	;
+	; Recommendation: Set to SMB2_10 or SMB3_00 to disable SMB1 for
+	; security. Only lower this if legacy clients require it.
+	;
+	; Default: SMB2_10
+	server min protocol = SMB2_10
+
+	; server max protocol (protocol version string)
+	;
+	; The maximum SMB protocol version the server advertises.
+	; The server will negotiate the highest version both client and
+	; server support, up to this limit. Set to SMB3_11 for best
+	; performance, security, and feature support.
+	;
+	; Valid values: same as "server min protocol" above.
+	;
+	; Default: SMB3_11
+	server max protocol = SMB3_11
+
+; ── Security & Authentication ────────────────────────────────────────────
+
+	; server signing (disabled | auto | mandatory)
+	;
+	; Controls whether SMB message signing is used. Signing protects
+	; against man-in-the-middle attacks by cryptographically verifying
+	; each message.
+	;
+	;   disabled   — Do not sign messages (fastest, least secure).
+	;   auto       — Sign if the client requests it (default; good balance).
+	;   mandatory  — Require signing; reject unsigned connections.
+	;
+	; For security-sensitive environments, set to "mandatory".
+	; Note: Signing adds ~5-10% CPU overhead per request.
+	;
+	; Default: auto
+	server signing = auto
+
+	; smb3 encryption (disabled | auto | mandatory)
+	;
+	; Controls SMB3 transport-level encryption (AES-128-CCM or AES-128-GCM).
+	; Encryption protects data in transit and is independent of signing.
+	; Requires SMB 3.0 or higher.
+	;
+	;   disabled   — Never encrypt. Clients requesting encryption are refused.
+	;   auto       — Encrypt if the client requests it (default).
+	;   mandatory  — Require encryption; reject unencrypted connections.
+	;                Clients using SMB 2.x cannot connect when mandatory.
+	;
+	; Default: auto
+	smb3 encryption = auto
+
+	; kerberos support (boolean)
+	;
+	; Enable Kerberos 5 authentication via SPNEGO. When enabled, the
+	; server can authenticate users via their Kerberos tickets instead
+	; of NTLM passwords. Requires a properly configured Kerberos realm
+	; (KDC, keytab, DNS SRV records).
+	;
+	; Set to yes only if your environment uses Active Directory or a
+	; standalone Kerberos realm. Requires ksmbd built with Kerberos libs.
+	;
+	; Default: no
+	kerberos support = no
+
+	; kerberos service name (string)
+	;
+	; The Kerberos service principal name (SPN) used for authentication.
+	; Format: service/hostname@REALM. If left empty, ksmbd auto-generates
+	; "cifs/<FQDN>" from the machine's hostname.
+	;
+	; Only relevant when "kerberos support = yes".
+	;
+	; Example: kerberos service name = cifs/fileserver.example.com@EXAMPLE.COM
+	;
+	; Default: (auto-generated from hostname)
+	kerberos service name =
+
+	; kerberos keytab file (file path)
+	;
+	; Path to the Kerberos keytab file containing the server's service
+	; key. If left empty, the system default keytab is used (typically
+	; /etc/krb5.keytab).
+	;
+	; Only relevant when "kerberos support = yes".
+	;
+	; Default: (system default keytab)
+	kerberos keytab file =
+
+; ── Guest & Anonymous Access ─────────────────────────────────────────────
+
+	; guest account (string — system username)
+	;
+	; The local system user account used for guest/anonymous connections.
+	; When a client connects as guest (either explicitly or via "map to
+	; guest"), file operations run under this user's UID/GID. The account
+	; must exist in /etc/passwd (but does not need a valid shell or
+	; home directory).
+	;
+	; Common choices: nobody, guest, ftp
+	;
+	; Default: nobody
+	guest account = nobody
+
+	; map to guest (never | bad user)
+	;
+	; Controls when failed authentication attempts are silently mapped
+	; to the guest account instead of being rejected.
+	;
+	;   never     — Never map to guest. Failed logins are rejected.
+	;   bad user  — If the username does not exist in the ksmbd password
+	;               database, treat the connection as guest (if the share
+	;               allows guest access via "guest ok = yes").
+	;
+	; Use "bad user" for shares that should be accessible without an
+	; account (e.g., public file drops). This avoids password prompts
+	; for unknown users.
+	;
+	; Default: never
+	map to guest = never
+
+	; restrict anonymous (integer, 0–2)
+	;
+	; Controls access restrictions for anonymous (guest) connections.
+	;
+	;   0 — No restrictions. Guests can access IPC$ and any share with
+	;       "guest ok = yes". This is the default and most permissive.
+	;   1 — Restrict anonymous access to IPC$ and shares that do not
+	;       have "guest ok = yes".
+	;   2 — Same as 1, with additional restrictions.
+	;
+	; For tighter security, set to 1 or 2 to prevent anonymous
+	; enumeration of shares and users.
+	;
+	; Default: 0
+	restrict anonymous = 0
+
+; ── Connection Limits & Timeouts ─────────────────────────────────────────
+
+	; max connections (integer, 1–65536)
+	;
+	; Maximum number of simultaneous client connections the server
+	; accepts across all shares. When this limit is reached, new
+	; connections are refused until existing ones close.
+	;
+	; Accepts size suffixes: 1K = 1024.
+	;
+	; Default: 256
+	max connections = 256
+
+	; max ip connections (integer, 1–65536)
+	;
+	; Maximum number of simultaneous connections from a single IP
+	; address. Limits resource consumption by a single client and
+	; provides basic protection against connection floods.
+	;
+	; Default: 32
+	max ip connections = 32
+
+	; max active sessions (integer, 1–65536)
+	;
+	; Maximum number of active authenticated sessions across the
+	; entire server. A session is established after successful
+	; authentication. Multiple connections from the same user may
+	; share a session or create separate ones depending on the client.
+	;
+	; Default: 1024
+	max active sessions = 1024
+
+	; max open files (integer, 1–65536)
+	;
+	; Maximum number of open file handles per client connection.
+	; Clients that exceed this limit receive STATUS_TOO_MANY_OPENED_FILES.
+	; Increase for workloads with many concurrent open files (e.g., build
+	; systems, databases).
+	;
+	; Default: 10000
+	max open files = 10000
+
+	; deadtime (integer, minutes)
+	;
+	; Time in minutes of client inactivity after which the server
+	; closes the connection. Set to 0 to disable (connections are
+	; kept alive indefinitely). Useful for reclaiming resources from
+	; idle clients.
+	;
+	; Default: 0 (disabled)
+	deadtime = 0
+
+	; ipc timeout (integer, seconds)
+	;
+	; Timeout in seconds for the kernel module to wait for a response
+	; from the ksmbd.mountd userspace daemon on heartbeat frames. If
+	; the daemon does not respond within this time, the kernel module
+	; considers it unresponsive.
+	;
+	; Set to 0 to disable the timeout (wait indefinitely).
+	;
+	; Default: 0 (disabled)
+	ipc timeout = 0
+
+; ── Performance Tuning ──────────────────────────────────────────────────
+
+	; smb2 max read (size, bytes)
+	;
+	; Maximum payload size the server accepts for a single SMB2 READ
+	; request. Larger values improve throughput for sequential reads
+	; but use more kernel memory per request.
+	;
+	; Accepts size suffixes: 4M = 4194304.
+	;
+	; Default: 4194304 (4 MiB)
+	smb2 max read = 4194304
+
+	; smb2 max write (size, bytes)
+	;
+	; Maximum payload size the server accepts for a single SMB2 WRITE
+	; request. Larger values improve throughput for sequential writes.
+	;
+	; Accepts size suffixes: 4M = 4194304.
+	;
+	; Default: 4194304 (4 MiB)
+	smb2 max write = 4194304
+
+	; smb2 max trans (size, bytes)
+	;
+	; Maximum size for SMB2 transactional operations: QUERY_INFO,
+	; SET_INFO, QUERY_DIRECTORY, and CHANGE_NOTIFY responses. Increase
+	; if clients report errors listing large directories or querying
+	; complex ACLs.
+	;
+	; Accepts size suffixes: 1M = 1048576.
+	;
+	; Default: 1048576 (1 MiB)
+	smb2 max trans = 1048576
+
+	; smb2 max credits (integer)
+	;
+	; Maximum number of SMB2 credits the server grants to a single
+	; client. Credits control how many operations a client can have
+	; in flight simultaneously. Higher values improve throughput for
+	; highly parallel workloads but consume more server resources.
+	;
+	; Default: 8192
+	smb2 max credits = 8192
+
+	; smbd max io size (size, bytes)
+	;
+	; Maximum read/write size for SMB Direct (RDMA) operations. Only
+	; relevant when using RDMA-capable network adapters (InfiniBand,
+	; RoCE, iWARP). Ignored for standard TCP connections.
+	;
+	; Accepts size suffixes: 8M = 8388608.
+	;
+	; Default: 8388608 (8 MiB)
+	smbd max io size = 8388608
+
+	; smb2 leases (boolean)
+	;
+	; Enable SMB2/3 directory leases. Leases allow clients to cache
+	; file data, metadata, and directory contents locally, reducing
+	; network round-trips. This significantly improves performance
+	; for applications that repeatedly read the same files.
+	;
+	; Disable only if you experience lease-related bugs or if clients
+	; require immediate visibility of changes made by other clients.
+	;
+	; Default: yes
+	smb2 leases = yes
+
+	; durable handles (boolean)
+	;
+	; Enable SMB2 durable file handles. Durable handles allow clients
+	; to reconnect to open files after a brief network interruption
+	; without losing state. The server preserves the file handle for
+	; a grace period, allowing the client to reclaim it.
+	;
+	; Useful for unreliable networks (Wi-Fi, VPN) or for enabling
+	; continuous availability features. Requires SMB 2.1 or higher.
+	;
+	; Default: no
+	durable handles = no
+
+	; server multi channel support (boolean)
+	;
+	; Enable SMB3 multi-channel support. When enabled, clients can
+	; establish multiple TCP connections to the server across different
+	; network interfaces or paths, providing:
+	;   - Increased throughput (aggregated bandwidth)
+	;   - Fault tolerance (automatic failover)
+	;   - Session binding across connections
+	;
+	; Requires SMB 3.0 or higher and multiple network interfaces on
+	; both client and server.
+	;
+	; Default: no
+	server multi channel support = no
+
+	; max worker threads (integer, 1–64)
+	;
+	; Number of worker threads in the ksmbd.mountd daemon for handling
+	; IPC requests from the kernel module (authentication, share config,
+	; RPC operations). Increase for servers with many concurrent
+	; connections or if authentication latency is high (e.g., LDAP/AD).
+	;
+	; Default: 4
+	max worker threads = 4
+
+; ── macOS / Apple Integration (Fruit) ───────────────────────────────────
+;
+; The "fruit" options control compatibility with macOS clients via the
+; AAPL SMB2 protocol extension. These are essential for proper Finder
+; behavior, Time Machine backups, and macOS-specific file attributes.
+
+	; fruit extensions (boolean)
+	;
+	; Master switch for macOS AAPL protocol extensions. When enabled,
+	; the server advertises Apple-specific capabilities during SMB2
+	; negotiation. Required for proper macOS Finder behavior, Time
+	; Machine, and Spotlight integration.
+	;
+	; Disable only if macOS clients are not used on this network.
+	;
+	; Default: yes
+	fruit extensions = yes
+
+	; fruit model (string — Apple hardware model identifier)
+	;
+	; The hardware model string reported to macOS Finder. This controls
+	; the icon displayed for this server in Finder's sidebar and Network
+	; view. Use a model identifier that best represents your server's
+	; form factor.
+	;
+	; Common values:
+	;   Xserve       — Rack server (recommended for NAS/servers)
+	;   RackMac      — Rack-mount Mac
+	;   MacPro       — Desktop tower
+	;   Macmini      — Mini desktop
+	;   iMac         — All-in-one desktop
+	;   MacBook      — Laptop
+	;   MacBookPro   — Laptop (Pro)
+	;   MacBookAir   — Laptop (Air)
+	;   PowerMac     — Legacy tower
+	;   PowerBook    — Legacy laptop
+	;   AppleTV1,1   — Apple TV
+	;   AirPort      — Network appliance
+	;
+	; Default: Xserve
+	fruit model = Xserve
+
+	; fruit zero file id (boolean)
+	;
+	; Return zero for file IDs in responses to AAPL-aware clients.
+	; macOS Finder uses file IDs to track files across renames. When
+	; serving from Linux filesystems, inode numbers may not match what
+	; macOS expects, causing Finder confusion. Setting this to yes
+	; avoids the problem by returning zero (Finder then uses path-based
+	; tracking instead).
+	;
+	; Default: yes
+	fruit zero file id = yes
+
+	; fruit nfs aces (boolean)
+	;
+	; Include synthetic NFS-style ACE entries in NT ACL responses to
+	; macOS clients. Some macOS applications check for specific NFS
+	; ACE types to determine access. Enable if macOS apps report
+	; incorrect permissions.
+	;
+	; Default: no
+	fruit nfs aces = no
+
+	; fruit copyfile (boolean)
+	;
+	; Advertise server-side copy support to macOS clients. When enabled,
+	; macOS Finder uses COPY_CHUNK_WRITE to copy files directly on the
+	; server without transferring data over the network. This is
+	; significantly faster for copies within the same share.
+	;
+	; Default: no
+	fruit copyfile = no
+
+; ── Advanced / Internal ─────────────────────────────────────────────────
+
+	; root directory (file path)
+	;
+	; If set, this path is prepended to all share paths, effectively
+	; creating a chroot-like environment. For example, if root directory
+	; is set to /srv/smb and a share has path = /data, the actual
+	; directory served is /srv/smb/data.
+	;
+	; Useful for containerized deployments or when share paths are
+	; relative to a common base directory.
+	;
+	; Default: (empty — share paths are absolute)
+	root directory =
+
+	; share:fake_fscaps (integer, bitmask)
+	;
+	; A bitmask of filesystem capability flags to report to clients
+	; regardless of the underlying filesystem's actual capabilities.
+	; Clients use these to decide which features are available (e.g.,
+	; sparse files, compression, encryption at rest).
+	;
+	; Common values:
+	;   0    — Report actual filesystem capabilities (honest).
+	;   64   — FILE_SUPPORTS_SPARSE_FILES (the default when omitted
+	;          from config — matches kernel default).
+	;
+	; Only change this if specific Windows applications require certain
+	; filesystem capabilities that your filesystem doesn't advertise.
+	;
+	; Default: 0
+	share:fake_fscaps = 0
+
+
+; =========================================================================
+; SHARE DEFINITIONS
+; =========================================================================
+;
+; Each section below [global] defines a file share that clients can
+; connect to. The section name becomes the share name visible to clients.
+;
+; Example: [Documents] makes the share accessible as \\SERVER\Documents
+;
+; Share names are case-insensitive and should not contain special
+; characters. The [IPC$] share is created automatically by ksmbd.
+;
+; PERMISSION MODEL:
+;   File permissions are determined by combining multiple settings:
+;
+;   1. read only / writable — base permission for the share
+;   2. valid users / invalid users — who can connect at all
+;   3. read list / write list — per-user permission overrides
+;   4. create mask / force create mode — file permission bits on creation
+;   5. hosts allow / hosts deny — IP-based access control
+;
+;   Precedence: invalid users > valid users
+;               read list > write list > read only
+;               hosts deny > hosts allow (when both match)
+;
+; COMMON PATTERNS:
+;
+;   Public read-only share:
+;     guest ok = yes
+;     read only = yes
+;
+;   Authenticated read-write share:
+;     guest ok = no
+;     read only = no
+;     valid users = alice, bob, @staff
+;
+;   Write for some, read-only for others:
+;     read only = yes
+;     write list = alice, @admins
+;
+;   Restricted to specific IPs:
+;     hosts allow = 192.168.1.0/24, 10.0.0.0/8
+;     hosts deny = 0.0.0.0/0
+
+
+; ─────────────────────────────────────────────────────────────────────────
+; Example 1: Standard Authenticated Share
+; ─────────────────────────────────────────────────────────────────────────
+;
+; A typical share requiring authentication. Users must have an account
+; in the ksmbd password database (managed with ksmbdctl user add).
+
+[Documents]
+
+	; path (string — absolute filesystem path)         [REQUIRED]
+	;
+	; The directory on the server's filesystem that this share exposes.
+	; Must be an absolute path. The directory must exist and be readable
+	; by the ksmbd kernel module (which runs as root). User-level access
+	; is enforced via the configured user's UID/GID.
+	;
+	; Default: (none — must be specified)
+	path = /srv/smb/documents
+
+	; comment (string)
+	;
+	; A human-readable description of this share. Displayed in Windows
+	; Explorer's "Network" view and in "net view \\server" output.
+	; Informational only — does not affect access.
+	;
+	; Default: (empty)
+	comment = Shared Documents
+
+	; browseable (boolean)
+	;
+	; Controls whether this share appears in network browse lists.
+	; When set to no, the share is "hidden" — it still exists and
+	; can be accessed by typing the full UNC path (\\server\share),
+	; but it won't show up in Windows Explorer's network browsing.
+	;
+	; Default: yes
 	browseable = yes
-	comment = My Share
-	continuous availability = no
-	create mask = 0744
-	crossmnt = yes
-	directory mask = 0755
-	follow symlinks = no
-	force create mode = 0000
-	force directory mode = 0000
-	force group =
-	force user =
-	fruit finder info = yes
-	fruit max access = yes
-	fruit resource fork size = no
-	fruit time machine = no
-	fruit time machine max size = 0
-	guest account =
-	guest ok = no
-	hide dot files = yes
-	hosts allow =
-	hosts deny =
-	inherit owner = no
-	invalid users =
-	max connections = 128
-	oplocks = yes
-	path = /tmp
-	read list =
+
+	; read only (boolean)
+	;
+	; When set to yes, no user can write to this share regardless of
+	; filesystem permissions. When set to no, write access is allowed
+	; (subject to filesystem permissions and write list restrictions).
+	;
+	; This takes precedence over "writable" and "write ok".
+	;
+	; Default: yes (shares are read-only by default for safety)
 	read only = no
-	store dos attributes = yes
+
+	; guest ok (boolean)
+	;
+	; Allow connections without a valid username/password. When set to
+	; yes, anonymous users can access this share using the "guest
+	; account" identity. When set to no, authentication is required.
+	;
+	; For security, leave this as "no" for shares with sensitive data.
+	;
+	; Default: no
+	guest ok = no
+
+	; valid users (comma-separated list of users and @groups)
+	;
+	; If non-empty, ONLY these users and members of these groups may
+	; connect to this share. All other authenticated users are denied.
+	; If empty, all authenticated users may connect.
+	;
+	; Prefix group names with @: valid users = alice, bob, @engineering
+	; Users must exist in the ksmbd password database (ksmbdpwd.db).
+	;
+	; Default: (empty — all authenticated users allowed)
 	valid users =
-	veto files =
-	vfs objects =
-	writable =
+
+	; invalid users (comma-separated list of users and @groups)
+	;
+	; Users and groups in this list are ALWAYS denied access to this
+	; share, even if they appear in "valid users". This is a blacklist
+	; that takes precedence over the whitelist.
+	;
+	; Example: invalid users = guest, @temp_contractors
+	;
+	; Default: (empty)
+	invalid users =
+
+	; read list (comma-separated list of users and @groups)
+	;
+	; Users in this list are granted READ-ONLY access, overriding
+	; "read only = no" and "write list" for these specific users.
+	; Use this for shares that are generally writable but where some
+	; users should only read.
+	;
+	; Precedence: read list > write list > read only setting.
+	;
+	; Default: (empty)
+	read list =
+
+	; write list (comma-separated list of users and @groups)
+	;
+	; Users in this list are granted WRITE access even if "read only"
+	; is set to yes. This allows a read-only share with specific
+	; users who can modify files.
+	;
+	; Overridden by "read list" — if a user is in both lists, they
+	; get read-only access.
+	;
+	; Example: write list = alice, @editors
+	;
+	; Default: (empty)
 	write list =
+
+	; hosts allow (comma-separated list of IPs, CIDRs, and hostnames)
+	;
+	; If non-empty, only clients connecting from these addresses can
+	; access this share. Supports:
+	;   - Exact IPv4:  192.168.1.100
+	;   - Exact IPv6:  fd00::1
+	;   - CIDR IPv4:   192.168.1.0/24  (matches 192.168.1.0–255)
+	;   - CIDR IPv6:   fd00::/64
+	;   - Hostnames:   fileserver.local
+	;
+	; If empty, all IPs are allowed (unless "hosts deny" restricts them).
+	;
+	; Default: (empty — all IPs allowed)
+	hosts allow =
+
+	; hosts deny (comma-separated list of IPs, CIDRs, and hostnames)
+	;
+	; Clients connecting from these addresses are denied access.
+	; Same format as "hosts allow". When both "hosts allow" and
+	; "hosts deny" are set, deny takes precedence for overlapping
+	; entries.
+	;
+	; Example: hosts deny = 10.0.0.0/8, 172.16.0.0/12
+	;
+	; Default: (empty — nothing denied)
+	hosts deny =
+
+	; max connections (integer, 1–65536)
+	;
+	; Maximum number of simultaneous connections to THIS share.
+	; Limits per-share resource usage. When the limit is reached,
+	; new connections to this share are refused.
+	;
+	; Can also be set in [global] to provide a default for all shares.
+	;
+	; Default: 128
+	max connections = 128
+
+; ── File Creation & Permissions ──────────────────────────────────────────
+
+	; create mask (octal, e.g. 0644)
+	;
+	; An AND bitmask applied to the permissions of newly created files.
+	; The requested permissions are ANDed with this mask, so it acts as
+	; an UPPER BOUND — bits not set in the mask will never be set on
+	; the file.
+	;
+	; Example: create mask = 0644 ensures files are never group- or
+	; world-executable.
+	;
+	; Default: 0744
+	create mask = 0744
+
+	; directory mask (octal, e.g. 0755)
+	;
+	; An AND bitmask applied to the permissions of newly created
+	; directories. Same logic as "create mask" but for directories.
+	;
+	; Default: 0755
+	directory mask = 0755
+
+	; force create mode (octal, e.g. 0000)
+	;
+	; An OR bitmask applied AFTER "create mask". Bits set here are
+	; ALWAYS set on new files, regardless of what the client requested.
+	; Use this to ensure minimum permissions.
+	;
+	; The final file permission is: (requested & create_mask) | force_create_mode
+	;
+	; Example: force create mode = 0660 ensures owner and group
+	; always have read/write on new files.
+	;
+	; Default: 0000 (no bits forced)
+	force create mode = 0000
+
+	; force directory mode (octal, e.g. 0000)
+	;
+	; An OR bitmask applied AFTER "directory mask" for new directories.
+	; Same logic as "force create mode" but for directories.
+	;
+	; Default: 0000 (no bits forced)
+	force directory mode = 0000
+
+	; force user (string — system username)
+	;
+	; If set, all file operations on this share run as this system user,
+	; regardless of which SMB user connected. The specified user must
+	; exist in /etc/passwd. This overrides the connecting user's UID.
+	;
+	; Useful when you want all files to be owned by a specific user
+	; (e.g., a service account).
+	;
+	; If "force group" is not set, the forced user's primary group is
+	; also used.
+	;
+	; Default: (empty — use the connecting user's identity)
+	force user =
+
+	; force group (string — system group name)
+	;
+	; If set, all file operations on this share use this system group's
+	; GID, regardless of the connecting user's groups. The group must
+	; exist in /etc/group.
+	;
+	; Takes precedence over "force user"'s group. Useful when multiple
+	; users should share file ownership under a common group.
+	;
+	; Default: (empty — use the connecting user's primary group)
+	force group =
+
+	; inherit owner (boolean)
+	;
+	; When set to yes, newly created files and directories inherit
+	; the ownership (UID) of their parent directory instead of using
+	; the connecting user's UID. Useful for shared directories where
+	; all content should appear owned by the same user.
+	;
+	; Default: no
+	inherit owner = no
+
+	; store dos attributes (boolean)
+	;
+	; Store DOS file attributes (Hidden, System, Archive, Read-Only)
+	; as extended attributes (xattr) on the filesystem. Required for
+	; Windows clients that rely on these attributes. The underlying
+	; filesystem must support xattr (ext4, XFS, Btrfs all do).
+	;
+	; Default: yes
+	store dos attributes = yes
+
+	; hide dot files (boolean)
+	;
+	; When set to yes, files and directories whose names start with a
+	; dot (.) are reported with the DOS "Hidden" attribute. They still
+	; appear in directory listings but show as hidden in Windows Explorer
+	; (unless "Show hidden files" is enabled).
+	;
+	; Default: yes
+	hide dot files = yes
+
+; ── Filesystem & VFS ────────────────────────────────────────────────────
+
+	; follow symlinks (boolean)
+	;
+	; Allow the server to follow symbolic links within this share.
+	; When set to no, symlinks are treated as regular files/directories
+	; and their targets are not resolved. When set to yes, symlinks are
+	; followed, but security checks prevent following links that escape
+	; the share's root path.
+	;
+	; WARNING: Enabling this may expose files outside the share path
+	; if symlinks point elsewhere. Use with caution.
+	;
+	; Default: no
+	follow symlinks = no
+
+	; crossmnt (boolean)
+	;
+	; Allow path lookups to cross filesystem mount point boundaries
+	; within this share. When set to yes, if the share path contains
+	; subdirectories that are separate mount points (e.g., NFS mounts,
+	; bind mounts), clients can access them transparently.
+	;
+	; Set to no to confine access strictly to the share's own filesystem.
+	;
+	; Default: yes
+	crossmnt = yes
+
+	; oplocks (boolean)
+	;
+	; Enable opportunistic locks (oplocks) for this share. Oplocks
+	; allow clients to cache file data locally and batch write operations,
+	; dramatically improving performance. The server breaks the oplock
+	; when another client needs access.
+	;
+	; Disable only if you experience data consistency issues with
+	; multiple concurrent writers.
+	;
+	; Default: yes
+	oplocks = yes
+
+	; veto files (slash-delimited pattern list)
+	;
+	; A list of file/directory name patterns that are hidden AND
+	; inaccessible to clients. Unlike "hide dot files", vetoed files
+	; cannot be accessed at all — they do not appear in listings and
+	; any attempt to open them fails.
+	;
+	; Patterns are separated by forward slashes. Wildcards:
+	;   * — matches any number of characters
+	;   ? — matches exactly one character
+	;
+	; Example: veto files = /.DS_Store/.Thumbs.db/.git/
+	;
+	; Default: (empty — nothing vetoed)
+	veto files =
+
+	; vfs objects (space-separated module list)
+	;
+	; VFS modules to load for this share. Available modules:
+	;
+	;   acl_xattr      — Store Windows ACLs as extended attributes.
+	;                     Enables full Windows permission model on Linux.
+	;   streams_xattr  — Store NTFS alternate data streams as xattr.
+	;                     Required for macOS resource forks, Finder info,
+	;                     and some Windows applications.
+	;
+	; Example: vfs objects = acl_xattr streams_xattr
+	;
+	; Default: (empty — no VFS modules loaded)
+	vfs objects =
+
+	; continuous availability (boolean)
+	;
+	; Marks this share as continuously available (CA). CA shares support
+	; persistent file handles that survive brief server outages or
+	; service restarts. The client can reconnect and reclaim its open
+	; file handles without data loss.
+	;
+	; Requires "durable handles = yes" in [global]. Primarily used for
+	; Hyper-V over SMB, SQL Server, and other applications that require
+	; uninterrupted file access.
+	;
+	; Default: no
+	continuous availability = no
+
+; ── macOS / Fruit (per-share) ───────────────────────────────────────────
+
+	; fruit time machine (boolean)
+	;
+	; Mark this share as a Time Machine backup destination. When enabled,
+	; macOS clients see this share as a valid target in Time Machine
+	; preferences. The share is advertised via mDNS with the _adisk._tcp
+	; service type.
+	;
+	; Requires "fruit extensions = yes" in [global].
+	;
+	; Default: no
+	fruit time machine = no
+
+	; fruit time machine max size (size, bytes)
+	;
+	; Maximum disk space Time Machine is allowed to use on this share.
+	; Set to 0 for unlimited (Time Machine will use all available space).
+	;
+	; Accepts size suffixes: 500G = 500 GiB, 1T = 1 TiB.
+	;
+	; Example: fruit time machine max size = 500G
+	;
+	; Default: 0 (unlimited)
+	fruit time machine max size = 0
+
+	; fruit finder info (boolean)
+	;
+	; Expose Finder metadata (type/creator codes, color labels, etc.)
+	; in directory listings via the AAPL extension. When enabled, macOS
+	; Finder can display custom icons and tags without extra round-trips.
+	;
+	; Default: yes
+	fruit finder info = yes
+
+	; fruit resource fork size (boolean)
+	;
+	; Include resource fork sizes in directory listing responses.
+	; Resource forks are a macOS filesystem concept for storing
+	; structured data alongside files. Most modern apps do not use
+	; resource forks, so this is rarely needed.
+	;
+	; Default: no
+	fruit resource fork size = no
+
+	; fruit max access (boolean)
+	;
+	; Include the user's maximum access permissions in directory listing
+	; responses. This allows Finder to display accurate permission badges
+	; (read-only, read-write, no-access) without separate access checks.
+	;
+	; Default: yes
+	fruit max access = yes
+
+	; guest account (string — system username)          [per-share]
+	;
+	; Override the global guest account for this specific share.
+	; When set, guest connections to this share use this user's
+	; UID/GID instead of the global guest account.
+	;
+	; Must exist in /etc/passwd.
+	;
+	; Default: (empty — uses the global guest account)
+	guest account =
+
+
+; ─────────────────────────────────────────────────────────────────────────
+; Example 2: Public Share (Anonymous Access)
+; ─────────────────────────────────────────────────────────────────────────
+;
+; A world-readable share that anyone can access without authentication.
+; Useful for public file drops, read-only documentation, or LAN-shared
+; media libraries.
+;
+; SECURITY NOTE: Anyone on the network can access this share. Do not use
+; for sensitive data. Consider restricting by IP with "hosts allow".
+;
+; SETUP:
+;   sudo mkdir -p /srv/smb/public
+;   sudo chmod 0777 /srv/smb/public       # or 0755 for read-only
+;
+; Also set in [global]:
+;   map to guest = bad user
+
+;[Public]
+;	path = /srv/smb/public
+;	comment = Public File Share (no password required)
+;	browseable = yes
+;	guest ok = yes
+;	read only = yes
+;
+;	; Restrict to local network only
+;	hosts allow = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
+;
+;	; Prevent execution of uploaded files
+;	create mask = 0644
+;	directory mask = 0755
+;
+;	; All files owned by nobody:nogroup
+;	force user = nobody
+;	force group = nogroup
+
+
+; ─────────────────────────────────────────────────────────────────────────
+; Example 3: Time Machine Backup Share
+; ─────────────────────────────────────────────────────────────────────────
+;
+; A share dedicated to macOS Time Machine backups. Each Mac on the network
+; can use this as a backup destination. Time Machine creates sparse bundle
+; disk images within the share.
+;
+; SETUP:
+;   sudo mkdir -p /srv/smb/timemachine
+;   sudo chown -R nobody:nogroup /srv/smb/timemachine
+;
+; Also set in [global]:
+;   fruit extensions = yes
+;   durable handles = yes    (recommended for backup reliability)
+;
+; After configuring, run:
+;   ksmbd-mdns configure     (to advertise via mDNS/Avahi)
+
+;[TimeMachine]
+;	path = /srv/smb/timemachine
+;	comment = Time Machine Backups
+;	read only = no
+;	guest ok = no
+;	valid users = alice, bob
+;
+;	; Time Machine configuration
+;	fruit time machine = yes
+;	fruit time machine max size = 500G
+;
+;	; VFS modules for macOS compatibility
+;	vfs objects = acl_xattr streams_xattr
+;
+;	; All backups owned by a dedicated user
+;	force user = timemachine
+;	force group = timemachine
+;
+;	; Prevent non-owners from reading backups
+;	create mask = 0600
+;	directory mask = 0700
+
+
+; ─────────────────────────────────────────────────────────────────────────
+; Example 4: Team Share with Group Permissions
+; ─────────────────────────────────────────────────────────────────────────
+;
+; A collaborative share for a team, where all files are group-owned and
+; new files inherit the group. Members can read and write; outsiders
+; are denied access.
+;
+; SETUP:
+;   sudo groupadd engineering
+;   sudo mkdir -p /srv/smb/engineering
+;   sudo chgrp engineering /srv/smb/engineering
+;   sudo chmod 2770 /srv/smb/engineering    # setgid for group inheritance
+;   ksmbdctl user add alice -p <password>
+;   ksmbdctl user add bob -p <password>
+
+;[Engineering]
+;	path = /srv/smb/engineering
+;	comment = Engineering Team Files
+;	read only = no
+;	browseable = yes
+;
+;	; Only team members can connect
+;	valid users = @engineering
+;
+;	; All files group-owned by engineering
+;	force group = engineering
+;	create mask = 0660
+;	directory mask = 0770
+;	force create mode = 0060
+;	force directory mode = 0070
+;
+;	; Hide version control directories
+;	veto files = /.git/.svn/.hg/
+;
+;	; Store Windows ACLs for interop
+;	vfs objects = acl_xattr
+
+
+; ─────────────────────────────────────────────────────────────────────────
+; Example 5: Restricted Admin Share
+; ─────────────────────────────────────────────────────────────────────────
+;
+; A share accessible only to specific administrators, from specific IP
+; addresses. Read-only for most admins; only the lead admin can write.
+; Hidden from network browsing for extra security.
+
+;[AdminBackups]
+;	path = /srv/backups
+;	comment = Server Backups (Restricted)
+;	browseable = no
+;	guest ok = no
+;
+;	; Only these users can connect
+;	valid users = admin, @sysadmins
+;
+;	; Read-only by default, admin can write
+;	read only = yes
+;	write list = admin
+;
+;	; Only accessible from management VLAN
+;	hosts allow = 10.10.0.0/24
+;	hosts deny = 0.0.0.0/0
+;
+;	; Preserve all permission bits
+;	create mask = 0644
+;	directory mask = 0755
+;	store dos attributes = yes
+
+
+; ─────────────────────────────────────────────────────────────────────────
+; Example 6: Read-Only Media Library
+; ─────────────────────────────────────────────────────────────────────────
+;
+; A large media collection shared read-only to all authenticated users.
+; Optimized for streaming with large read sizes and oplock caching.
+
+;[Media]
+;	path = /mnt/media
+;	comment = Music, Photos, and Videos
+;	browseable = yes
+;	read only = yes
+;	guest ok = no
+;
+;	; Allow traversing into mounted drives
+;	crossmnt = yes
+;	follow symlinks = yes
+;
+;	; Performance: enable caching
+;	oplocks = yes
+
+
+; =========================================================================
+; DEBUGGING & TROUBLESHOOTING
+; =========================================================================
+;
+; ksmbd provides runtime debug controls via ksmbd.control (not via this
+; config file). Use these commands for troubleshooting:
+;
+;   # Show current debug components:
+;   cat /sys/class/ksmbd-control/debug
+;
+;   # Enable specific debug components:
+;   sudo ksmbd.control -d "smb"        # SMB protocol messages
+;   sudo ksmbd.control -d "auth"       # Authentication
+;   sudo ksmbd.control -d "vfs"        # Filesystem operations
+;   sudo ksmbd.control -d "oplock"     # Oplock/lease management
+;   sudo ksmbd.control -d "ipc"        # Kernel-userspace IPC
+;   sudo ksmbd.control -d "conn"       # Connection management
+;   sudo ksmbd.control -d "rdma"       # SMB Direct / RDMA
+;   sudo ksmbd.control -d "all"        # All components
+;
+;   # Disable all debug output:
+;   sudo ksmbd.control -d "0"
+;
+; Debug output goes to the kernel log (dmesg / journalctl -k).
+;
+; The ksmbd.mountd daemon logs to syslog by default. Start with
+; --nodetach to keep it in the foreground for interactive debugging.
+;
+;
+; =========================================================================
+; QUICK REFERENCE: SERVER MANAGEMENT
+; =========================================================================
+;
+;   # Add a user to the ksmbd password database:
+;   ksmbdctl user add USERNAME -p PASSWORD
+;
+;   # List users:
+;   ksmbdctl user list
+;
+;   # Start the server:
+;   sudo ksmbd.mountd
+;   # or: sudo systemctl start ksmbd
+;
+;   # Reload configuration without restarting:
+;   sudo ksmbd.control --reload
+;   # or: sudo systemctl reload ksmbd
+;
+;   # Stop the server:
+;   sudo ksmbd.control --shutdown
+;   # or: sudo systemctl stop ksmbd
+;
+;   # Check server status:
+;   sudo ksmbd.control --status
+;
