@@ -338,6 +338,11 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_FOLLOW_SYMLINKS:
 	case KSMBD_SHARE_CONF_WRITABLE:
 	case KSMBD_SHARE_CONF_CROSSMNT:
+	case KSMBD_SHARE_CONF_FRUIT_TIME_MACHINE:
+	case KSMBD_SHARE_CONF_FRUIT_FINDER_INFO:
+	case KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE:
+	case KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS:
+	case KSMBD_SHARE_CONF_CONTINUOUS_AVAILABILITY:
 		ml = new_va_ml(ml, p, "yes", "no", NULL);
 		break;
 	case KSMBD_SHARE_CONF_GUEST_ACCOUNT:
@@ -360,6 +365,9 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_VFS_OBJECTS:
 		p = __rtrim_list(buf, p + *buflen);
 		ml = new_va_ml(ml, p, "acl_xattr", "streams_xattr", NULL);
+		break;
+	default:
+		break;
 	}
 
 	if (ml) {
