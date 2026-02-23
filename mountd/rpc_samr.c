@@ -422,7 +422,7 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	char *home_dir;
 	g_autofree char *profile_path = NULL;
 	char hostname[NAME_MAX];
-	int home_dir_len, i, ret;
+	int i, ret;
 
 	ch = samr_ch_lookup(dce->sm_req.handle);
 	if (!ch)
@@ -431,31 +431,16 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	if (gethostname(hostname, NAME_MAX))
 		return KSMBD_RPC_ENOMEM;
 
-	home_dir_len = 2 + strlen(hostname) + 1 + strlen(ch->user->name) + 1;
-
-	home_dir = g_try_malloc0(home_dir_len);
+	home_dir = g_strdup_printf("\\\\%s\\%s", hostname, ch->user->name);
 	if (!home_dir)
 		return KSMBD_RPC_ENOMEM;
 
-	/* Make Home dir string */
-	strcpy(home_dir, "\\\\");
-	strcat(home_dir, hostname);
-	strcat(home_dir, "\\");
-	strcat(home_dir, ch->user->name);
-
-	profile_path = g_try_malloc0(home_dir_len + strlen("profile"));
+	profile_path = g_strdup_printf("\\\\%s\\%s\\profile",
+				       hostname, ch->user->name);
 	if (!profile_path) {
 		g_free(home_dir);
 		return KSMBD_RPC_ENOMEM;
 	}
-
-	/* Make Profile path string */
-	strcat(profile_path, "\\\\");
-	strcat(profile_path, hostname);
-	strcat(profile_path, "\\");
-	strcat(profile_path, ch->user->name);
-	strcat(profile_path, "\\");
-	strcat(profile_path, "profile");
 
 	dce->num_pointers++;
 	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
