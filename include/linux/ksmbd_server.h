@@ -210,7 +210,7 @@ struct ksmbd_share_config_response {
 static inline char *
 ksmbd_share_config_path(struct ksmbd_share_config_response *sc)
 {
-	char *p = sc->____payload;
+	char *p = (char *)sc->____payload;
 
 	if (sc->veto_list_sz)
 		p += sc->veto_list_sz + 1;

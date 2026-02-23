@@ -456,10 +456,6 @@ static void add_hosts_map(struct ksmbd_share *share,
 		if (**pp == 0x00)
 			continue;
 
-		/*
-		 * FIXME
-		 */
-
 		if (g_hash_table_lookup(*hosts_map, *pp))
 			continue;
 
