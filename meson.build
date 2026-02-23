@@ -16,6 +16,9 @@ exec awk '/define KSMBD_TOOLS_VERSION / { gsub(/"/,"",$3); printf "%s", $3 }' in
 include_dirs = include_directories(
   '.',
   'include',
+  'addshare',
+  'adduser',
+  'control',
 )
 
 glib_dep = dependency(
@@ -159,6 +162,13 @@ configure_file(
   input: 'ksmbd.service.in',
   output: 'ksmbd.service',
   install_dir: systemdsystemunitdir,
+  configuration: in_data,
+)
+
+configure_file(
+  input: 'ksmbdctl.8.in',
+  output: 'ksmbdctl.8',
+  install_dir: get_option('mandir') / 'man8',
   configuration: in_data,
 )
 

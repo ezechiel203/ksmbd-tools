@@ -17,6 +17,9 @@ ksmbd.control \- control ksmbd.mountd and ksmbd daemons
 .B ksmbd.control
 [\-v] \-c
 .SH DESCRIPTION
+.B Note:
+\fBksmbd.control\fR is deprecated. Use \fBksmbdctl\fR subcommands instead. See \fBksmbdctl\fR(8).
+.PP
 \fBksmbd.control\fR controls \fBksmbd.mountd\fR(8) user mode and \fBksmbd\fR kernel mode daemons.
 .SH OPTIONS
 .TP
@@ -56,6 +59,9 @@ There is NO WARRANTY, to the extent permitted by law.
 .SH "REPORTING BUGS"
 For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-tools/issues.
 .SH "SEE ALSO"
+.TP
+\fBUnified Tool\fR
+\fBksmbdctl\fR(8)
 .TP
 \fBUtilities\fR
 \fBksmbd.addshare\fR(8),

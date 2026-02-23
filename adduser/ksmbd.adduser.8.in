@@ -5,6 +5,9 @@ ksmbd.adduser \- configure users for ksmbdpwd.db of ksmbd.mountd
 .B ksmbd.adduser
 [\-v] [\-P \fI\,PWDDB\/\fR] [\-C \fI\,CONF\/\fR] [\-a | \-u | \-d] [\-p \fI\,PWD\/\fR] \fI\,USER\/\fR
 .SH DESCRIPTION
+.B Note:
+\fBksmbd.adduser\fR is deprecated. Use \fBksmbdctl user\fR instead. See \fBksmbdctl\fR(8).
+.PP
 \fBksmbd.adduser\fR configures users for \fBksmbdpwd.db\fR(5) user database of \fBksmbd.mountd\fR(8) user mode daemon.
 \fBksmbd.adduser\fR can parse \fBksmbd.conf\fR(5) configuration file so as to guard against deletion of users that are depended on.
 \fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
@@ -59,6 +62,9 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 .TP
 \fBConfiguration File\fR
 \fBksmbd.conf\fR(5)
+.TP
+\fBUnified Tool\fR
+\fBksmbdctl\fR(8)
 .TP
 \fBUtilities\fR
 \fBksmbd.addshare\fR(8),

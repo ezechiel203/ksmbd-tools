@@ -5,6 +5,9 @@ ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 .B ksmbd.mountd
 [\-v] [\-p \fI\,PORT\/\fR] [\-n[\fI\,WAY\/\fR]] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR]
 .SH DESCRIPTION
+.B Note:
+\fBksmbd.mountd\fR is deprecated. Use \fBksmbdctl start\fR instead. See \fBksmbdctl\fR(8).
+.PP
 \fBksmbd.mountd\fR starts \fBksmbd.mountd\fR user mode and \fBksmbd\fR kernel mode daemons.
 \fBksmbd.mountd\fR has to parse \fBksmbd.conf\fR(5) configuration file in order to start.
 \fBksmbd.mountd\fR can parse \fBksmbdpwd.db\fR(5) user database so as to support non-guest sessions.
@@ -53,6 +56,9 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 .TP
 \fBUser Database\fR
 \fBksmbdpwd.db\fR(5)
+.TP
+\fBUnified Tool\fR
+\fBksmbdctl\fR(8)
 .TP
 \fBUtilities\fR
 \fBksmbd.addshare\fR(8),

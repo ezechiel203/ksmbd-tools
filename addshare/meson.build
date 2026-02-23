@@ -23,5 +23,5 @@ configure_file(
 install_symlink(
   'ksmbd.addshare',
   install_dir: get_option('sbindir'),
-  pointing_to: get_option('prefix') / get_option('libexecdir') / 'ksmbd.tools',
+  pointing_to: 'ksmbdctl',
 )

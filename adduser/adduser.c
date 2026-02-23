@@ -72,7 +72,7 @@ int adduser_main(int argc, char **argv)
 	int ret = -EINVAL;
 	g_autofree char *pwddb = NULL, *name = NULL, *password = NULL;
 	g_autofree char *smbconf = NULL;
-	command_fn *command = NULL;
+	user_command_fn *command = NULL;
 	int c;
 
 	while ((c = getopt_long(argc, argv, "audp:P:C:vVh", opts, NULL)) != EOF)

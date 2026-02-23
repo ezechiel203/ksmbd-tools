@@ -1,0 +1,232 @@
+.TH KSMBDCTL "8" "" "ksmbd-tools @ksmbd_tools_version@" "System Administration"
+.SH NAME
+ksmbdctl \- unified management tool for ksmbd
+.SH SYNOPSIS
+.B ksmbdctl
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+\fBksmbdctl\fR is the unified management tool for \fBksmbd\fR, the in-kernel
+CIFS/SMB3 server for Linux.
+It replaces the individual \fBksmbd.addshare\fR, \fBksmbd.adduser\fR,
+\fBksmbd.control\fR, and \fBksmbd.mountd\fR tools with a single command
+using a subcommand-based interface.
+.PP
+\fBksmbdctl\fR manages user accounts, share configuration, server lifecycle,
+debugging, and feature inspection.
+It communicates with the \fBksmbd\fR kernel module via sysfs and generic
+netlink, and manages configuration files
+\fBksmbd.conf\fR(5) and \fBksmbdpwd.db\fR(5).
+.SH "GLOBAL OPTIONS"
+These options may be given before any command.
+.TP
+\fB\-C\fR, \fB\-\-config\fR=\fI\,CONF\/\fR
+Use \fI\,CONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR.
+.TP
+\fB\-P\fR, \fB\-\-pwddb\fR=\fI\,PWDDB\/\fR
+Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Be verbose. Enables debug-level logging.
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Output version information and exit.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Display help and exit.
+.SH COMMANDS
+.SS "Server Lifecycle"
+.TP
+\fBksmbdctl start\fR [\fB\-p\fR \fI\,PORT\/\fR] [\fB\-n\fR[\fI\,WAY\/\fR]] [\fB\-j\fR]
+Start the ksmbd daemon.
+This is equivalent to running \fBksmbd.mountd\fR.
+.RS
+.TP
+\fB\-p\fR, \fB\-\-port\fR=\fI\,PORT\/\fR
+Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR.
+.TP
+\fB\-n\fR, \fB\-\-nodetach\fR[=\fI\,WAY\/\fR]
+Do not detach process from foreground.
+If \fI\,WAY\/\fR is \fB1\fR, become process group leader (default).
+If \fI\,WAY\/\fR is \fB0\fR, detach.
+.TP
+\fB\-j\fR, \fB\-\-json\-log\fR
+Output logs as JSON objects.
+.RE
+.TP
+\fBksmbdctl stop\fR
+Shut down both the ksmbd daemon and the kernel server.
+Sends \fBSIGTERM\fR to the daemon and writes to
+\fB/sys/class/ksmbd\-control/kill_server\fR.
+.TP
+\fBksmbdctl reload\fR
+Notify the ksmbd daemon to reload its configuration.
+Sends \fBSIGHUP\fR to the daemon process.
+.TP
+\fBksmbdctl status\fR
+Display server status: whether the ksmbd kernel module is loaded,
+its version, whether the daemon is running with its PID, and
+currently enabled debug components.
+.TP
+\fBksmbdctl features\fR
+Display configured feature flags from \fBksmbd.conf\fR(5):
+SMB2 leases, encryption, multichannel, durable handles, Fruit extensions,
+signing mode, protocol version range, and worker thread count.
+.TP
+\fBksmbdctl version\fR
+Output version information for both the userspace tools and
+the loaded ksmbd kernel module.
+.SS "User Management"
+.PP
+Users are stored in the \fBksmbdpwd.db\fR(5) database.
+After any change, the daemon is automatically notified to reload.
+.TP
+\fBksmbdctl user add\fR [\fB\-p\fR \fI\,PWD\/\fR] \fI\,USER\/\fR
+Add \fI\,USER\/\fR to the user database.
+If \fB\-p\fR is not given, the password is prompted interactively.
+\fI\,USER\/\fR must be UTF-8, [1, 48) bytes, and cannot contain a colon.
+.TP
+\fBksmbdctl user delete\fR \fI\,USER\/\fR
+Delete \fI\,USER\/\fR from the user database.
+.TP
+\fBksmbdctl user update\fR [\fB\-p\fR \fI\,PWD\/\fR] \fI\,USER\/\fR
+Update the password for \fI\,USER\/\fR.
+If \fB\-p\fR is not given, the password is prompted interactively.
+.TP
+\fBksmbdctl user list\fR
+List all users in the user database, one per line.
+.SS "Share Management"
+.PP
+Shares are configured in \fBksmbd.conf\fR(5).
+After any change, the daemon is automatically notified to reload.
+.TP
+\fBksmbdctl share add\fR [\fB\-o\fR \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+Add \fI\,SHARE\/\fR to the configuration file.
+Share parameters can be given with \fB\-o\fR (e.g., \fB\-o "path = /srv/share"\fR).
+This option can be given multiple times.
+If no \fB\-o\fR options are given, parameters are prompted interactively.
+\fI\,SHARE\/\fR must be UTF-8, [1, 64) bytes, and is case-insensitive.
+.TP
+\fBksmbdctl share delete\fR \fI\,SHARE\/\fR
+Delete \fI\,SHARE\/\fR from the configuration file.
+.TP
+\fBksmbdctl share update\fR [\fB\-o\fR \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+Update parameters for \fI\,SHARE\/\fR in the configuration file.
+.TP
+\fBksmbdctl share list\fR
+List all shares with their names and comments.
+Requires the daemon to be running.
+.TP
+\fBksmbdctl share show\fR \fI\,SHARE\/\fR
+Show all configuration parameters for \fI\,SHARE\/\fR.
+.SS "Debug Controls"
+.PP
+Debug components control kernel-level debug printing via
+\fB/sys/class/ksmbd\-control/debug\fR.
+Requires the ksmbd module to be loaded.
+.TP
+\fBksmbdctl debug set\fR \fI\,COMPONENT\/\fR
+Toggle debug printing for \fI\,COMPONENT\/\fR.
+Valid components are \fBall\fR, \fBsmb\fR, \fBauth\fR, \fBvfs\fR,
+\fBoplock\fR, \fBipc\fR, \fBconn\fR, and \fBrdma\fR.
+Enabled components are shown enclosed in brackets (\fB[]\fR).
+.TP
+\fBksmbdctl debug show\fR
+Display currently enabled debug components.
+.TP
+\fBksmbdctl debug off\fR
+Disable all debug output.
+.SS "Configuration"
+.TP
+\fBksmbdctl config show\fR [\fI\,SECTION\/\fR]
+Display the current configuration.
+Without \fI\,SECTION\/\fR, shows all sections (global and all shares).
+With \fI\,SECTION\/\fR, shows only that section
+(e.g., \fBksmbdctl config show global\fR).
+.TP
+\fBksmbdctl config validate\fR
+Parse and validate the configuration file and user database
+without starting the daemon. Reports errors and exits.
+.SH FILES
+.TP
+\fB@sysconfdir@/ksmbd/ksmbd.conf\fR
+Server configuration file. See \fBksmbd.conf\fR(5).
+.TP
+\fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR
+User password database. See \fBksmbdpwd.db\fR(5).
+.TP
+\fB@runstatedir@/ksmbd.lock\fR
+PID lock file for the daemon process.
+.TP
+\fB/sys/class/ksmbd\-control/kill_server\fR
+Sysfs attribute to shut down the ksmbd kernel server.
+.TP
+\fB/sys/class/ksmbd\-control/debug\fR
+Sysfs attribute to toggle kernel debug components.
+.TP
+\fB/sys/module/ksmbd/version\fR
+Sysfs attribute showing the ksmbd kernel module version.
+.SH "EXIT STATUS"
+The exit status is 0 on success and 1 on failure.
+.SH EXAMPLES
+.TP
+Start the server in the foreground:
+\fBksmbdctl start \-\-nodetach\fR
+.TP
+Add a user:
+\fBksmbdctl user add john\fR
+.TP
+Add a share non-interactively:
+\fBksmbdctl share add myshare \-o "path = /srv/share" \-o "read only = no"\fR
+.TP
+Show server status:
+\fBksmbdctl status\fR
+.TP
+Show feature configuration:
+\fBksmbdctl features\fR
+.TP
+Enable SMB debug logging:
+\fBksmbdctl debug set smb\fR
+.TP
+Validate configuration:
+\fBksmbdctl config validate\fR
+.TP
+Show a specific share:
+\fBksmbdctl share show myshare\fR
+.TP
+Reload configuration after manual edits:
+\fBksmbdctl reload\fR
+.TP
+Shut down the server:
+\fBksmbdctl stop\fR
+.SH "BACKWARD COMPATIBILITY"
+The legacy command names \fBksmbd.addshare\fR, \fBksmbd.adduser\fR,
+\fBksmbd.control\fR, and \fBksmbd.mountd\fR are installed as symlinks
+to \fBksmbdctl\fR and continue to work with their original syntax.
+When invoked via a legacy name, the tool behaves identically to
+the original command.
+.SH SIGNALS
+When running in daemon mode (\fBksmbdctl start\fR), the daemon responds to:
+.TP
+\fBSIGHUP\fR
+Reload configuration files.
+.TP
+\fBSIGUSR1\fR
+List current configuration to a named pipe.
+.TP
+\fBSIGTERM\fR, \fBSIGINT\fR, \fBSIGQUIT\fR
+Shut down gracefully.
+.SH COPYRIGHT
+Copyright \(co 2015-2026 ksmbd-tools contributors.
+License GPLv2: GNU GPL version 2 <https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>.
+.br
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+.SH "REPORTING BUGS"
+For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-tools/issues.
+.SH "SEE ALSO"
+.TP
+\fBConfiguration File\fR
+\fBksmbd.conf\fR(5)
+.TP
+\fBUser Database\fR
+\fBksmbdpwd.db\fR(5)

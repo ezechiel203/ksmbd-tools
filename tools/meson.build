@@ -5,6 +5,7 @@ ksmbd_tools_files = [
   'management/session.c',
   'config_parser.c',
   'tools.c',
+  'ksmbdctl.c',
 ]
 
 if krb5_dep.found()
@@ -32,7 +33,7 @@ tools_lib = static_library(
 )
 
 executable(
-  'ksmbd.tools',
+  'ksmbdctl',
   'main.c',
   include_directories: include_dirs,
   c_args: [
@@ -50,5 +51,5 @@ executable(
     mountd_lib,
   ],
   install: true,
-  install_dir: get_option('libexecdir'),
+  install_dir: get_option('sbindir'),
 )

@@ -8,8 +8,10 @@
 #ifndef __KSMBD_SHARE_ADMIN_H__
 #define __KSMBD_SHARE_ADMIN_H__
 
-typedef int command_fn(char *smbconf, char *name, char **options);
+typedef int share_command_fn(char *smbconf, char *name, char **options);
 
-command_fn command_add_share, command_update_share, command_delete_share;
+int command_add_share(char *smbconf, char *name, char **options);
+int command_update_share(char *smbconf, char *name, char **options);
+int command_delete_share(char *smbconf, char *name, char **options);
 
 #endif /* __KSMBD_SHARE_ADMIN_H__ */

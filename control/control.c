@@ -18,6 +18,7 @@
 
 #include "tools.h"
 #include "config_parser.h"
+#include "control.h"
 #include <linux/ksmbd_server.h>
 
 #define PATH_CLASS_ATTR_KILL_SERVER	"/sys/class/ksmbd-control/kill_server"
@@ -71,7 +72,7 @@ static const struct option opts[] = {
 	{NULL,			0,			NULL,	 0  }
 };
 
-static int control_shutdown(void)
+int control_shutdown(void)
 {
 	int ret, fd;
 
@@ -111,7 +112,7 @@ err_kill:
 	return ret;
 }
 
-static int control_reload(void)
+int control_reload(void)
 {
 	int ret;
 
@@ -128,7 +129,7 @@ static int control_reload(void)
 	return ret;
 }
 
-static int control_list(void)
+int control_list(void)
 {
 	g_autofree char *fifo_path =
 		g_strdup_printf("%s.%d", PATH_FIFO, getpid());
@@ -224,7 +225,7 @@ out:
 	return ret;
 }
 
-static int control_show_version(void)
+int control_show_version(void)
 {
 	g_autofree char *version = NULL;
 	int fd, ret;
@@ -263,7 +264,7 @@ err:
 	return ret;
 }
 
-static int control_debug(char *comp)
+int control_debug(char *comp)
 {
 	g_autofree char *debug = NULL;
 	int fd, ret;
@@ -309,7 +310,7 @@ err:
 	return ret;
 }
 
-static int read_sysfs_string(const char *path, char *buf, size_t bufsz)
+int read_sysfs_string(const char *path, char *buf, size_t bufsz)
 {
 	int fd;
 	ssize_t len;
@@ -331,7 +332,7 @@ static int read_sysfs_string(const char *path, char *buf, size_t bufsz)
 	return 0;
 }
 
-static int control_status(void)
+int control_status(void)
 {
 	struct stat st;
 	int module_loaded;
@@ -399,7 +400,7 @@ static const char *signing_to_str(int signing)
 	}
 }
 
-static int control_features(void)
+int control_features(void)
 {
 	int ret;
 	size_t i;

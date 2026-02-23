@@ -5,6 +5,9 @@ ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 .B ksmbd.addshare
 [\-v] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR] [\-a | \-u | \-d] [\-o \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
 .SH DESCRIPTION
+.B Note:
+\fBksmbd.addshare\fR is deprecated. Use \fBksmbdctl share\fR instead. See \fBksmbdctl\fR(8).
+.PP
 \fBksmbd.addshare\fR configures shares for \fBksmbd.conf\fR(5) configuration file of \fBksmbd.mountd\fR(8) user mode daemon.
 \fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
 \fBksmbd.addshare\fR can parse \fBksmbdpwd.db\fR(5) user database so as to provide completions when prompting.
@@ -61,6 +64,9 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 .TP
 \fBUser Database\fR
 \fBksmbdpwd.db\fR(5)
+.TP
+\fBUnified Tool\fR
+\fBksmbdctl\fR(8)
 .TP
 \fBUtilities\fR
 \fBksmbd.adduser\fR(8),

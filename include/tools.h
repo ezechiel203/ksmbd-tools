@@ -181,7 +181,8 @@ extern const char *get_tool_name(void);
 int show_version(void);
 
 typedef int tool_main_fn(int argc, char **argv);
-tool_main_fn addshare_main, adduser_main, control_main, mountd_main;
+tool_main_fn addshare_main, adduser_main, control_main, mountd_main,
+	     ksmbdctl_main;
 extern tool_main_fn *tool_main;
 
 #define TOOL_IS_ADDSHARE \

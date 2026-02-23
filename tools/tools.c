@@ -439,7 +439,9 @@ void remove_config(void)
 
 int set_tool_main(char *name)
 {
-	if (!strcmp(name, "ksmbd.addshare"))
+	if (!strcmp(name, "ksmbdctl"))
+		tool_main = ksmbdctl_main;
+	else if (!strcmp(name, "ksmbd.addshare"))
 		tool_main = addshare_main;
 	else if (!strcmp(name, "ksmbd.adduser"))
 		tool_main = adduser_main;

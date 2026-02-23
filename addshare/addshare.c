@@ -74,7 +74,7 @@ int addshare_main(int argc, char **argv)
 	g_auto(GStrv) options = NULL;
 	g_autoptr(GPtrArray) __options =
 		g_ptr_array_new_with_free_func(g_free);
-	command_fn *command = NULL;
+	share_command_fn *command = NULL;
 	int c;
 
 	while ((c = getopt_long(argc, argv, "audo:C:P:vVh", opts, NULL)) != EOF)

@@ -48,53 +48,55 @@ check_output() {
 echo "=== ksmbd-tools Integration Tests ==="
 echo ""
 
-# Find the built multi-call binary
-KSMBD_TOOLS="$BUILDDIR/tools/ksmbd.tools"
-if [ ! -x "$KSMBD_TOOLS" ]; then
-    echo "ERROR: Cannot find $KSMBD_TOOLS - build first"
+# Find the ksmbdctl binary
+KSMBDCTL="$BUILDDIR/tools/ksmbdctl"
+if [ ! -x "$KSMBDCTL" ]; then
+    echo "ERROR: Cannot find $KSMBDCTL - build first"
     exit 1
 fi
 
-KSMBD_TOOLS=$(realpath "$KSMBD_TOOLS")
+KSMBDCTL=$(realpath "$KSMBDCTL")
 
-# ksmbd.tools uses argv[0] basename to dispatch to the correct tool.
-# Create a temporary directory with symlinks named after each tool.
+# Create backward-compat symlinks for legacy tools
 SYMDIR=$(mktemp -d)
-ln -s "$KSMBD_TOOLS" "$SYMDIR/ksmbd.adduser"
-ln -s "$KSMBD_TOOLS" "$SYMDIR/ksmbd.addshare"
-ln -s "$KSMBD_TOOLS" "$SYMDIR/ksmbd.control"
-ln -s "$KSMBD_TOOLS" "$SYMDIR/ksmbd.mountd"
+ln -s "$KSMBDCTL" "$SYMDIR/ksmbd.adduser"
+ln -s "$KSMBDCTL" "$SYMDIR/ksmbd.addshare"
+ln -s "$KSMBDCTL" "$SYMDIR/ksmbd.control"
+ln -s "$KSMBDCTL" "$SYMDIR/ksmbd.mountd"
+ln -s "$KSMBDCTL" "$SYMDIR/ksmbdctl"
 
 ADDUSER="$SYMDIR/ksmbd.adduser"
 ADDSHARE="$SYMDIR/ksmbd.addshare"
 CONTROL="$SYMDIR/ksmbd.control"
-MOUNTD="$SYMDIR/ksmbd.mountd"
+CTL="$SYMDIR/ksmbdctl"
 
 TMPDIR=$(mktemp -d)
 trap "rm -rf $SYMDIR $TMPDIR" EXIT
 
-echo "--- Binary existence ---"
-check "ksmbd.tools binary exists" test -x "$KSMBD_TOOLS"
+# ========================================
+# Section 1: ksmbdctl subcommand tests
+# ========================================
+
+echo "--- ksmbdctl binary ---"
+check "ksmbdctl binary exists" test -x "$KSMBDCTL"
+check_output "ksmbdctl --help shows usage" "Usage: ksmbdctl" "$CTL" --help
+check_output "ksmbdctl --version shows version" "ksmbd-tools version" "$CTL" --version
 
 echo ""
-echo "--- Multi-call dispatch ---"
-check_fail "ksmbd.tools rejects unknown base name" "$KSMBD_TOOLS"
+echo "--- ksmbdctl subcommand help ---"
+check_output "ksmbdctl user shows usage" "ksmbdctl user" "$CTL" user
+check_output "ksmbdctl share shows usage" "ksmbdctl share" "$CTL" share
+check_output "ksmbdctl debug shows usage" "ksmbdctl debug" "$CTL" debug
+check_output "ksmbdctl config shows usage" "ksmbdctl config" "$CTL" config
 
 echo ""
-echo "--- Help output ---"
-check_output "ksmbd.adduser --help shows usage" "Usage:" "$ADDUSER" --help
-check_output "ksmbd.addshare --help shows usage" "Usage:" "$ADDSHARE" --help
-check_output "ksmbd.control --help shows shutdown" "shutdown" "$CONTROL" --help
-check_output "ksmbd.mountd --help shows usage" "usage\|Usage" "$MOUNTD" --help
+echo "--- ksmbdctl status/features ---"
+check_output "ksmbdctl status reports module state" "ksmbd module" "$CTL" status
+check_output "ksmbdctl features shows feature table" "Feature Status" "$CTL" features
 
 echo ""
-echo "--- Version output ---"
-check_output "ksmbd.adduser --version shows version" "ksmbd-tools version" "$ADDUSER" --version
-check_output "ksmbd.addshare --version shows version" "ksmbd-tools version" "$ADDSHARE" --version
-check_output "ksmbd.control --version shows version" "ksmbd-tools version" "$CONTROL" --version
-
-echo ""
-echo "--- Config file handling ---"
+echo "--- ksmbdctl version ---"
+check_output "ksmbdctl version shows tools version" "ksmbd-tools version" "$CTL" version
 
 # Create a test config
 cat > "$TMPDIR/ksmbd.conf" << 'CONF'
@@ -115,92 +117,120 @@ CONF
 touch "$TMPDIR/ksmbdpwd.db"
 
 echo ""
-echo "--- User management ---"
-# Add user with -p (non-interactive, CI-friendly)
-"$ADDUSER" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" -a -p testpass testuser >/dev/null 2>&1 \
-    && pass "adduser -a testuser" || fail "adduser -a testuser"
+echo "--- ksmbdctl config subcommands ---"
+check_output "ksmbdctl config validate" "valid" "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" config validate
+check_output "ksmbdctl config show has global" "global" "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" config show
+check_output "ksmbdctl config show global" "workgroup" "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" config show global
 
-# Verify user was added to the password database
+echo ""
+echo "--- ksmbdctl user subcommands ---"
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add -p testpass testuser >/dev/null 2>&1 \
+    && pass "ksmbdctl user add testuser" || fail "ksmbdctl user add testuser"
+
 if grep -q "testuser:" "$TMPDIR/ksmbdpwd.db"; then
-    pass "user entry exists in pwddb"
+    pass "user entry exists in pwddb (ksmbdctl)"
 else
-    fail "user entry exists in pwddb"
+    fail "user entry exists in pwddb (ksmbdctl)"
 fi
 
-# Update user password
-"$ADDUSER" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" -u -p newpass testuser >/dev/null 2>&1 \
-    && pass "adduser -u testuser" || fail "adduser -u testuser"
+# List users
+check_output "ksmbdctl user list shows user" "testuser" "$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user list
+
+# Update user
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user update -p newpass testuser >/dev/null 2>&1 \
+    && pass "ksmbdctl user update testuser" || fail "ksmbdctl user update testuser"
 
 # Delete user
-"$ADDUSER" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" -d testuser >/dev/null 2>&1 \
-    && pass "adduser -d testuser" || fail "adduser -d testuser"
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete testuser >/dev/null 2>&1 \
+    && pass "ksmbdctl user delete testuser" || fail "ksmbdctl user delete testuser"
 
-# Verify user was deleted
 if grep -q "testuser:" "$TMPDIR/ksmbdpwd.db"; then
-    fail "user entry removed from pwddb"
+    fail "user removed from pwddb (ksmbdctl)"
 else
-    pass "user entry removed from pwddb"
+    pass "user removed from pwddb (ksmbdctl)"
 fi
 
 echo ""
-echo "--- Share management ---"
-# Add a new share
-"$ADDSHARE" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" -a -o "path = /tmp/new" newshare >/dev/null 2>&1 \
-    && pass "addshare -a newshare" || fail "addshare -a newshare"
+echo "--- ksmbdctl share subcommands ---"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add -o "path = /tmp/new" newshare >/dev/null 2>&1 \
+    && pass "ksmbdctl share add newshare" || fail "ksmbdctl share add newshare"
 
-# Verify new share is in config file
 if grep -q "\[newshare\]" "$TMPDIR/ksmbd.conf"; then
-    pass "newshare section exists in config"
+    pass "newshare section exists in config (ksmbdctl)"
 else
-    fail "newshare section exists in config"
+    fail "newshare section exists in config (ksmbdctl)"
 fi
 
-if grep -q "path = /tmp/new" "$TMPDIR/ksmbd.conf"; then
-    pass "newshare path is set in config"
-else
-    fail "newshare path is set in config"
-fi
+# Show share
+check_output "ksmbdctl share show newshare" "path" "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share show newshare
 
-# Original share should still be present
-if grep -q "\[testshare\]" "$TMPDIR/ksmbd.conf"; then
-    pass "testshare still present in config"
-else
-    fail "testshare still present in config"
-fi
-
-# Update existing share
-"$ADDSHARE" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" -u -o "path = /tmp/updated" newshare >/dev/null 2>&1 \
-    && pass "addshare -u newshare" || fail "addshare -u newshare"
+# Update share
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share update -o "path = /tmp/updated" newshare >/dev/null 2>&1 \
+    && pass "ksmbdctl share update newshare" || fail "ksmbdctl share update newshare"
 
 if grep -q "path = /tmp/updated" "$TMPDIR/ksmbd.conf"; then
-    pass "newshare path updated in config"
+    pass "newshare path updated (ksmbdctl)"
 else
-    fail "newshare path updated in config"
+    fail "newshare path updated (ksmbdctl)"
 fi
 
 # Delete share
-"$ADDSHARE" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" -d newshare >/dev/null 2>&1 \
-    && pass "addshare -d newshare" || fail "addshare -d newshare"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete newshare >/dev/null 2>&1 \
+    && pass "ksmbdctl share delete newshare" || fail "ksmbdctl share delete newshare"
 
 if grep -q "\[newshare\]" "$TMPDIR/ksmbd.conf"; then
-    fail "newshare removed from config"
+    fail "newshare removed from config (ksmbdctl)"
 else
-    pass "newshare removed from config"
+    pass "newshare removed from config (ksmbdctl)"
 fi
 
 echo ""
-echo "--- Control tool (without running server) ---"
-# --status works even without the kernel module (shows not loaded)
-check_output "control --status reports module state" "ksmbd module" "$CONTROL" --status
-# --features shows feature flags (uses default config, may warn but still succeeds)
-check_output "control --features shows feature table" "Feature Status" "$CONTROL" --features
+echo "--- ksmbdctl error handling ---"
+check_fail "ksmbdctl user add rejects missing name" "$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add
+check_fail "ksmbdctl share add rejects missing name" "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add
+check_fail "ksmbdctl rejects unknown command" "$CTL" nonexistent
+
+# ========================================
+# Section 2: Backward compatibility tests (legacy symlinks)
+# ========================================
 
 echo ""
-echo "--- Invalid input handling ---"
-# Adding a user without a name should fail
-check_fail "adduser rejects missing username" "$ADDUSER" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" -a -p pass
-# Adding a share without a name should fail
-check_fail "addshare rejects missing share name" "$ADDSHARE" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" -a -o "path = /tmp"
+echo "--- Backward compatibility (legacy symlinks) ---"
+
+# Recreate config for legacy tests
+cat > "$TMPDIR/ksmbd.conf" << 'CONF'
+[global]
+    workgroup = TESTGROUP
+
+[testshare]
+    path = /tmp
+    read only = no
+CONF
+touch "$TMPDIR/ksmbdpwd.db"
+
+check_output "ksmbd.adduser --help shows usage" "Usage:" "$ADDUSER" --help
+check_output "ksmbd.addshare --help shows usage" "Usage:" "$ADDSHARE" --help
+check_output "ksmbd.control --help shows shutdown" "shutdown" "$CONTROL" --help
+
+check_output "ksmbd.adduser --version" "ksmbd-tools version" "$ADDUSER" --version
+check_output "ksmbd.addshare --version" "ksmbd-tools version" "$ADDSHARE" --version
+check_output "ksmbd.control --version" "ksmbd-tools version" "$CONTROL" --version
+
+# Legacy user add/delete
+"$ADDUSER" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" -a -p testpass legacyuser >/dev/null 2>&1 \
+    && pass "legacy adduser -a legacyuser" || fail "legacy adduser -a legacyuser"
+"$ADDUSER" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" -d legacyuser >/dev/null 2>&1 \
+    && pass "legacy adduser -d legacyuser" || fail "legacy adduser -d legacyuser"
+
+# Legacy share add/delete
+"$ADDSHARE" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" -a -o "path = /tmp/legacy" legshare >/dev/null 2>&1 \
+    && pass "legacy addshare -a legshare" || fail "legacy addshare -a legshare"
+"$ADDSHARE" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" -d legshare >/dev/null 2>&1 \
+    && pass "legacy addshare -d legshare" || fail "legacy addshare -d legshare"
+
+# Legacy control
+check_output "legacy control --status" "ksmbd module" "$CONTROL" --status
+check_output "legacy control --features" "Feature Status" "$CONTROL" --features
 
 echo ""
 echo "=== Results ==="

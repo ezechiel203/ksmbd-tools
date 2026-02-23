@@ -497,6 +497,9 @@ There is NO WARRANTY, to the extent permitted by law.
 For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-tools/issues.
 .SH "SEE ALSO"
 .TP
+\fBUnified Tool\fR
+\fBksmbdctl\fR(8)
+.TP
 \fBUtilities\fR
 \fBksmbd.addshare\fR(8),
 \fBksmbd.adduser\fR(8),
