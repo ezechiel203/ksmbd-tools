@@ -1,11 +1,11 @@
 .TH KSMBDPWD.DB "5" "" "ksmbd-tools @ksmbd_tools_version@" "File Formats and Conventions"
 .SH NAME
-ksmbdpwd.db \- the user database for ksmbd.mountd
+ksmbdpwd.db \- the user database used by ksmbdctl
 .SH DESCRIPTION
-\fBksmbdpwd.db\fR is the user database for \fBksmbd.mountd\fR(8) user mode daemon.
-\fBksmbd.adduser\fR(8) may be used for configuring users for \fBksmbdpwd.db\fR.
-\fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes, if it had made any, by sending the \fBSIGHUP\fR signal to \fBksmbd.mountd\fR.
-\fBksmbd.control \-\-reload\fR can be used for notifying \fBksmbd.mountd\fR of changes when not using \fBksmbd.adduser\fR.
+\fBksmbdpwd.db\fR is the user database for the ksmbd userspace daemon.
+\fBksmbdctl user\fR may be used for configuring users in \fBksmbdpwd.db\fR.
+\fBksmbdctl user\fR notifies the daemon of changes, if it had made any, by sending \fBSIGHUP\fR.
+\fBksmbdctl reload\fR can be used for notifying the daemon of changes when not using \fBksmbdctl user\fR.
 \fBksmbdpwd.db\fR is expected to be at \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR by default. \" PATH_PWDDB
 .SH "FILE FORMAT"
 \fBksmbdpwd.db\fR consists of users separated by newlines.
@@ -23,5 +23,4 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 .SH "SEE ALSO"
 .TP
 \fBUtilities\fR
-\fBksmbd.adduser\fR(8),
-\fBksmbd.mountd\fR(8)
+\fBksmbdctl\fR(8)

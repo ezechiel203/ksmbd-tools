@@ -8,6 +8,8 @@
 #include <memory.h>
 #include <glib.h>
 #include <errno.h>
+#include <stdint.h>
+#include <limits.h>
 #include <netlink/netlink.h>
 #include <netlink/msg.h>
 #include <netlink/genl/genl.h>
@@ -29,7 +31,13 @@ static struct nl_sock *sk;
 struct ksmbd_ipc_msg *ipc_msg_alloc(size_t sz)
 {
 	struct ksmbd_ipc_msg *msg;
-	size_t msg_sz = sz + sizeof(struct ksmbd_ipc_msg) + 1;
+	size_t msg_sz;
+
+	if (sz > SIZE_MAX - sizeof(struct ksmbd_ipc_msg) - 1) {
+		pr_err("IPC message size overflow: %zu\n", sz);
+		return NULL;
+	}
+	msg_sz = sz + sizeof(struct ksmbd_ipc_msg) + 1;
 
 	if (msg_sz > KSMBD_IPC_MAX_MESSAGE_SIZE) {
 		pr_err("IPC message is too large: %zu\n", msg_sz);
@@ -106,16 +114,22 @@ static int handle_unsupported_event(struct nl_cache_ops *unused,
 static int ifc_list_size(void)
 {
 	char **pp = global_conf.interfaces;
-	int sz = 0;
+	size_t sz = 0;
 
 	for (; *pp; pp++) {
 		char *p = *pp;
+		size_t len;
 
 		if (*p == 0x00)
 			continue;
-		sz += strlen(p) + 1;
+
+		len = strlen(p) + 1;
+		if (len > INT_MAX || sz > INT_MAX - len)
+			return -EOVERFLOW;
+		sz += len;
 	}
-	return sz;
+
+	return (int)sz;
 }
 
 static int ipc_ksmbd_starting_up(void)
@@ -125,8 +139,11 @@ static int ipc_ksmbd_starting_up(void)
 	int ifc_list_sz = 0;
 	int ret;
 
-	if (global_conf.bind_interfaces_only && global_conf.interfaces)
-		ifc_list_sz += ifc_list_size();
+	if (global_conf.bind_interfaces_only && global_conf.interfaces) {
+		ifc_list_sz = ifc_list_size();
+		if (ifc_list_sz < 0)
+			return ifc_list_sz;
+	}
 
 	msg = ipc_msg_alloc(sizeof(*ev) + ifc_list_sz);
 	if (!msg)
@@ -152,57 +169,68 @@ static int ipc_ksmbd_starting_up(void)
 	ev->smb2_max_credits = global_conf.smb2_max_credits;
 
 	if (global_conf.server_min_protocol) {
-		strncpy(ev->min_prot,
-			global_conf.server_min_protocol,
-			sizeof(ev->min_prot) - 1);
+		g_strlcpy((char *)ev->min_prot,
+			  global_conf.server_min_protocol,
+			  sizeof(ev->min_prot));
 	}
 	if (global_conf.server_max_protocol) {
-		strncpy(ev->max_prot,
-			global_conf.server_max_protocol,
-			sizeof(ev->max_prot) - 1);
+		g_strlcpy((char *)ev->max_prot,
+			  global_conf.server_max_protocol,
+			  sizeof(ev->max_prot));
 	}
 	if (global_conf.netbios_name) {
-		strncpy(ev->netbios_name,
-			global_conf.netbios_name,
-			sizeof(ev->netbios_name) - 1);
+		g_strlcpy((char *)ev->netbios_name,
+			  global_conf.netbios_name,
+			  sizeof(ev->netbios_name));
 	}
 	if (global_conf.server_string) {
-		strncpy(ev->server_string,
-			global_conf.server_string,
-			sizeof(ev->server_string) - 1);
+		g_strlcpy((char *)ev->server_string,
+			  global_conf.server_string,
+			  sizeof(ev->server_string));
 	}
 	if (global_conf.work_group) {
-		strncpy(ev->work_group,
-			global_conf.work_group,
-			sizeof(ev->work_group) - 1);
+		g_strlcpy((char *)ev->work_group,
+			  global_conf.work_group,
+			  sizeof(ev->work_group));
 	}
 	if (global_conf.fruit_model) {
-		strncpy(ev->fruit_model,
-			global_conf.fruit_model,
-			sizeof(ev->fruit_model) - 1);
+		g_strlcpy((char *)ev->fruit_model,
+			  global_conf.fruit_model,
+			  sizeof(ev->fruit_model));
 	}
 
 	if (ifc_list_sz) {
-		char *config_payload = KSMBD_STARTUP_CONFIG_INTERFACES(ev);
+		char *config_payload = (char *)KSMBD_STARTUP_CONFIG_INTERFACES(ev);
 		char **pp = global_conf.interfaces;
-		int sz = 0;
+		size_t sz = 0;
 
 		ev->ifc_list_sz = ifc_list_sz;
 
 		for (; *pp; pp++) {
 			char *p = *pp;
+			size_t len;
 
 			if (*p == 0x00)
 				continue;
-			strcpy(config_payload + sz, p);
-			sz += strlen(p) + 1;
+
+			len = strlen(p) + 1;
+			if (len > (size_t)ifc_list_sz - sz) {
+				ret = -EOVERFLOW;
+				goto out;
+			}
+
+			memcpy(config_payload + sz, p, len);
+			sz += len;
 		}
+
+		ev->ifc_list_sz = (unsigned int)sz;
 		ev->bind_interfaces_only = global_conf.bind_interfaces_only;
 
 		cp_group_kv_list_free(global_conf.interfaces);
 	}
 
 	ret = ipc_msg_send(msg);
+out:
 	ipc_msg_free(msg);
 	return ret;
 }

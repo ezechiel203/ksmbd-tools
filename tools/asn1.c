@@ -19,6 +19,12 @@
 
 #include "asn1.h"
 
+const unsigned long SPNEGO_OID[SPNEGO_OID_LEN] = { 1, 3, 6, 1, 5, 5, 2 };
+const unsigned long NTLMSSP_OID[NTLMSSP_OID_LEN] = { 1, 3, 6, 1, 4, 1, 311, 2, 2, 10 };
+const unsigned long KRB5_OID[KRB5_OID_LEN] = { 1, 2, 840, 113554, 1, 2, 2 };
+const unsigned long KRB5U2U_OID[KRB5U2U_OID_LEN] = { 1, 2, 840, 113554, 1, 2, 2, 3 };
+const unsigned long MSKRB5_OID[MSKRB5_OID_LEN] = { 1, 2, 840, 48018, 1, 2, 2 };
+
 void
 asn1_open(struct asn1_ctx *ctx, unsigned char *buf, unsigned int len)
 {
@@ -133,37 +139,6 @@ asn1_header_decode(struct asn1_ctx *ctx,
 		*eoc = ctx->pointer + len;
 	else
 		*eoc = NULL;
-	return 1;
-}
-
-static unsigned char
-asn1_eoc_decode(struct asn1_ctx *ctx, unsigned char *eoc)
-{
-	unsigned char ch;
-
-	if (eoc == NULL) {
-		if (!asn1_octet_decode(ctx, &ch))
-			return 0;
-
-		if (ch != 0x00) {
-			ctx->error = ASN1_ERR_DEC_EOC_MISMATCH;
-			return 0;
-		}
-
-		if (!asn1_octet_decode(ctx, &ch))
-			return 0;
-
-		if (ch != 0x00) {
-			ctx->error = ASN1_ERR_DEC_EOC_MISMATCH;
-			return 0;
-		}
-		return 1;
-	}
-
-	if (ctx->pointer != eoc) {
-		ctx->error = ASN1_ERR_DEC_LENGTH_MISMATCH;
-		return 0;
-	}
 	return 1;
 }
 

@@ -441,7 +441,7 @@ int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 		return ret;
 	auto_align_offset(dce);
 
-	return ret;
+	return 0;
 }
 
 int ndr_write_string(struct ksmbd_dcerpc *dce, char *str)
@@ -517,8 +517,9 @@ char *ndr_read_vstring(struct ksmbd_dcerpc *dce)
 	gchar *out;
 	gsize bytes_read = 0;
 	gsize bytes_written = 0;
+	size_t raw_bytes;
 
-	int raw_len;
+	__u32 raw_len;
 	int charset = KSMBD_CHARSET_UTF16LE;
 
 	if (ndr_read_int32(dce, &raw_len))
@@ -540,11 +541,21 @@ char *ndr_read_vstring(struct ksmbd_dcerpc *dce)
 		return out;
 	}
 
-	if (dce->offset + 2 * raw_len > dce->payload_sz)
+	if (dce->offset > dce->payload_sz)
 		return NULL;
 
+	if (dce->flags & KSMBD_DCERPC_ASCII_STRING) {
+		raw_bytes = raw_len;
+		if (raw_bytes > dce->payload_sz - dce->offset)
+			return NULL;
+	} else {
+		if (raw_len > (dce->payload_sz - dce->offset) / 2)
+			return NULL;
+		raw_bytes = (size_t)raw_len * 2;
+	}
+
 	out = ksmbd_gconvert(PAYLOAD_HEAD(dce),
-			     raw_len * 2,
+			     raw_bytes,
 			     KSMBD_CHARSET_DEFAULT,
 			     charset,
 			     &bytes_read,
@@ -552,7 +563,7 @@ char *ndr_read_vstring(struct ksmbd_dcerpc *dce)
 	if (!out)
 		return NULL;
 
-	dce->offset += raw_len * 2;
+	dce->offset += raw_bytes;
 	auto_align_offset(dce);
 	return out;
 }

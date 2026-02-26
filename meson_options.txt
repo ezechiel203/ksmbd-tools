@@ -5,9 +5,68 @@ option(
 )
 
 option(
+  'systemd',
+  type: 'feature',
+  value: 'auto',
+  description: 'Support for systemd (sd_notify and unit file installation)',
+)
+
+option(
   'systemdsystemunitdir',
   type: 'string',
   description: 'Directory to install systemd unit file (query pkg-config by default)',
+)
+
+option(
+  'openrc',
+  type: 'feature',
+  value: 'auto',
+  description: 'Install OpenRC init script (auto-enables when systemd is not found)',
+)
+
+option(
+  'openrcinitdir',
+  type: 'string',
+  description: 'Directory to install OpenRC init script (default: sysconfdir/init.d)',
+)
+
+option(
+  'runit',
+  type: 'feature',
+  value: 'disabled',
+  description: 'Install runit service directory',
+)
+
+option(
+  'runitsvdir',
+  type: 'string',
+  description: 'Directory to install runit service (default: /etc/sv)',
+)
+
+option(
+  's6',
+  type: 'feature',
+  value: 'disabled',
+  description: 'Install s6 service directory',
+)
+
+option(
+  's6svcdir',
+  type: 'string',
+  description: 'Directory to install s6 service (default: /etc/s6/sv)',
+)
+
+option(
+  'sysvinit',
+  type: 'feature',
+  value: 'disabled',
+  description: 'Install SysV/LSB init script',
+)
+
+option(
+  'sysvrcdir',
+  type: 'string',
+  description: 'Directory to install SysV init script (default: sysconfdir/init.d)',
 )
 
 option(

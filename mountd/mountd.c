@@ -30,13 +30,14 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.mountd [-v] [-j] [-p PORT] [-n[WAY]] [-C CONF] [-P PWDDB]\n");
+		"Usage: ksmbd.mountd [-v] [-j] [-F] [-p PORT] [-n[WAY]] [-C CONF] [-P PWDDB]\n");
 
 	if (status != EXIT_SUCCESS)
 		printf("Try `ksmbd.mountd --help' for more information.\n");
 	else
 		printf(
 			"\n"
+			"  -F, --foreground        run in foreground (for process supervisors)\n"
 			"  -p, --port=PORT         bind to PORT instead of TCP port 445\n"
 			"  -n, --nodetach[=WAY]    do not detach process from foreground;\n"
 			"                          if WAY is 1, become process group leader (default);\n"
@@ -54,6 +55,7 @@ static void usage(int status)
 }
 
 static struct option opts[] = {
+	{"foreground",	no_argument,		NULL,	'F' },
 	{"port",	required_argument,	NULL,	'p' },
 	{"nodetach",	optional_argument,	NULL,	'n' },
 	{"config",	required_argument,	NULL,	'C' },
@@ -381,6 +383,13 @@ static int manager_init(int nodetach)
 		break;
 	case 1:
 		setpgid(0, 0);
+		break;
+	case 2:
+		/* True foreground: no fork, no setpgid, no setsid.
+		 * For process supervisors (runit, s6, dinit).
+		 * Worker fork still happens inside worker_init().
+		 */
+		break;
 	}
 
 	ret = cp_parse_lock();
@@ -421,8 +430,11 @@ int mountd_main(int argc, char **argv)
 	int nodetach = 0;
 	int c;
 
-	while ((c = getopt_long(argc, argv, "p:n::C:P:jvVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "Fp:n::C:P:jvVh", opts, NULL)) != EOF)
 		switch (c) {
+		case 'F':
+			nodetach = 2;
+			break;
 		case 'p':
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
 			break;

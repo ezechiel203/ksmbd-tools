@@ -41,6 +41,9 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 	struct ksmbd_user *user = NULL;
 	struct ksmbd_share *share = NULL;
 	struct ksmbd_tree_conn *conn = new_ksmbd_tree_conn();
+	char *account = (char *)req->account;
+	char *share_name = (char *)req->share;
+	char *peer_addr = (char *)req->peer_addr;
 	int ret;
 
 	if (!conn) {
@@ -48,9 +51,11 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 		return -ENOMEM;
 	}
 
-	if (sm_check_sessions_capacity(req->session_id)) {
-		resp->status = KSMBD_TREE_CONN_STATUS_TOO_MANY_SESSIONS;
-		pr_debug("treecon: Too many active sessions\n");
+	if (strnlen(share_name, sizeof(req->share)) == sizeof(req->share) ||
+	    strnlen(account, sizeof(req->account)) == sizeof(req->account) ||
+	    strnlen(peer_addr, sizeof(req->peer_addr)) == sizeof(req->peer_addr)) {
+		resp->status = KSMBD_TREE_CONN_STATUS_ERROR;
+		pr_err("treecon: malformed request with unterminated string\n");
 		goto out_error;
 	}
 
@@ -62,10 +67,10 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 		}
 	}
 
-	share = shm_lookup_share(req->share);
+	share = shm_lookup_share(share_name);
 	if (!share) {
 		resp->status = KSMBD_TREE_CONN_STATUS_NO_SHARE;
-		pr_err("treecon: Unknown net share: %s\n", req->share);
+		pr_err("treecon: Unknown net share: %s\n", share_name);
 		goto out_error;
 	}
 
@@ -84,20 +89,20 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 
 	ret = shm_lookup_hosts_map(share,
 				   KSMBD_SHARE_HOSTS_ALLOW_MAP,
-				   req->peer_addr);
+				   peer_addr);
 	if (ret == -ENOENT) {
 		resp->status = KSMBD_TREE_CONN_STATUS_HOST_DENIED;
-		pr_debug("treecon: Host denied: %s\n", req->peer_addr);
+		pr_debug("treecon: Host denied: %s\n", peer_addr);
 		goto out_error;
 	}
 
 	if (ret != 0) {
 		ret = shm_lookup_hosts_map(share,
 					   KSMBD_SHARE_HOSTS_DENY_MAP,
-					   req->peer_addr);
+					   peer_addr);
 		if (ret == 0) {
 			resp->status = KSMBD_TREE_CONN_STATUS_HOST_DENIED;
-			pr_err("treecon: Host denied: %s\n", req->peer_addr);
+			pr_err("treecon: Host denied: %s\n", peer_addr);
 			goto out_error;
 		}
 	}
@@ -139,10 +144,10 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 		}
 	}
 
-	user = usm_lookup_user(req->account);
+	user = usm_lookup_user(account);
 	if (!user) {
 		resp->status = KSMBD_TREE_CONN_STATUS_NO_USER;
-		pr_err("treecon: User `%s' not found\n", req->account);
+		pr_err("treecon: User `%s' not found\n", account);
 		goto out_error;
 	}
 
@@ -154,7 +159,7 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 
 	ret = shm_lookup_users_map(share,
 				   KSMBD_SHARE_ADMIN_USERS_MAP,
-				   req->account);
+				   account);
 	if (ret == 0) {
 		set_conn_flag(conn, KSMBD_TREE_CONN_FLAG_ADMIN_ACCOUNT);
 		goto bind;
@@ -162,7 +167,7 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 
 	ret = shm_lookup_users_map(share,
 				   KSMBD_SHARE_INVALID_USERS_MAP,
-				   req->account);
+				   account);
 	if (ret == 0) {
 		resp->status = KSMBD_TREE_CONN_STATUS_INVALID_USER;
 		pr_err("treecon: User is on invalid users list\n");
@@ -171,7 +176,7 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 
 	ret = shm_lookup_users_map(share,
 				   KSMBD_SHARE_READ_LIST_MAP,
-				   req->account);
+				   account);
 	if (ret == 0) {
 		set_conn_flag(conn, KSMBD_TREE_CONN_FLAG_READ_ONLY);
 		clear_conn_flag(conn, KSMBD_TREE_CONN_FLAG_WRITABLE);
@@ -180,7 +185,7 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 
 	ret = shm_lookup_users_map(share,
 				   KSMBD_SHARE_WRITE_LIST_MAP,
-				   req->account);
+				   account);
 	if (ret == 0) {
 		set_conn_flag(conn, KSMBD_TREE_CONN_FLAG_WRITABLE);
 		goto bind;
@@ -188,12 +193,18 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 
 	ret = shm_lookup_users_map(share,
 				   KSMBD_SHARE_VALID_USERS_MAP,
-				   req->account);
+				   account);
 	if (ret == 0)
 		goto bind;
 	if (ret == -ENOENT) {
 		resp->status = KSMBD_TREE_CONN_STATUS_INVALID_USER;
 		pr_err("treecon: User is not on valid users list\n");
+		goto out_error;
+	}
+
+	if (sm_check_sessions_capacity(req->session_id)) {
+		resp->status = KSMBD_TREE_CONN_STATUS_TOO_MANY_SESSIONS;
+		pr_debug("treecon: Too many active sessions\n");
 		goto out_error;
 	}
 

@@ -418,7 +418,7 @@ int load_config(char *pwddb, char *smbconf)
 		wp_init();
 	}
 
-	return ret;
+	return 0;
 }
 
 void remove_config(void)
@@ -441,14 +441,6 @@ int set_tool_main(char *name)
 {
 	if (!strcmp(name, "ksmbdctl"))
 		tool_main = ksmbdctl_main;
-	else if (!strcmp(name, "ksmbd.addshare"))
-		tool_main = addshare_main;
-	else if (!strcmp(name, "ksmbd.adduser"))
-		tool_main = adduser_main;
-	else if (!strcmp(name, "ksmbd.control"))
-		tool_main = control_main;
-	else if (!strcmp(name, "ksmbd.mountd"))
-		tool_main = mountd_main;
 	else
 		tool_main = NULL;
 
@@ -470,6 +462,8 @@ const char *get_tool_name(void)
 			return "ksmbd.mountd(manager)";
 		return "ksmbd.mountd";
 	}
+	if (tool_main == ksmbdctl_main)
+		return "ksmbdctl";
 	return "ksmbd.tools";
 }
 
@@ -478,4 +472,3 @@ int show_version(void)
 	pr_info("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return 0;
 }
-

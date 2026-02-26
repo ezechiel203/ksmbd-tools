@@ -10,16 +10,3 @@ control_lib = static_library(
     glib_dep,
   ],
 )
-
-configure_file(
-  input: 'ksmbd.control.8.in',
-  output: 'ksmbd.control.8',
-  install_dir: get_option('mandir') / 'man8',
-  configuration: in_data,
-)
-
-install_symlink(
-  'ksmbd.control',
-  install_dir: get_option('sbindir'),
-  pointing_to: 'ksmbdctl',
-)

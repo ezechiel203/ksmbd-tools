@@ -32,7 +32,7 @@ BuildRequires:  libtool
 BuildRequires:  systemd-rpm-macros
 
 Requires(pre):	kernel-default >= 5.15
-Requires(pre):	systemd >= 245
+%{?systemd_requires}
 
 %description
 Collection of userspace utilities for the ksmbd kernel server.
@@ -49,15 +49,12 @@ make %{?_smp_mflags}
 %make_install
 
 %files
+%{_sbindir}/ksmbdctl
 %{_sbindir}/ksmbd.addshare
 %{_sbindir}/ksmbd.adduser
 %{_sbindir}/ksmbd.control
 %{_sbindir}/ksmbd.mountd
-%{_libexecdir}/ksmbd.tools
-%{_mandir}/man8/ksmbd.addshare.8*
-%{_mandir}/man8/ksmbd.adduser.8*
-%{_mandir}/man8/ksmbd.control.8*
-%{_mandir}/man8/ksmbd.mountd.8*
+%{_mandir}/man8/ksmbdctl.8*
 %{_mandir}/man5/ksmbd.conf.5*
 %{_mandir}/man5/ksmbdpwd.db.5*
 %{_sysconfdir}/ksmbd/ksmbd.conf.example

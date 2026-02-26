@@ -36,7 +36,7 @@ static void ksmbdctl_usage(void)
 		"Unified management tool for ksmbd (in-kernel SMB server).\n"
 		"\n"
 		"Commands:\n"
-		"  start                Start the ksmbd daemon\n"
+		"  start [-F]           Start the ksmbd daemon (-F for foreground)\n"
 		"  stop                 Shut down ksmbd daemon and kernel server\n"
 		"  reload               Reload configuration\n"
 		"  status               Show server status\n"
@@ -44,14 +44,16 @@ static void ksmbdctl_usage(void)
 		"  version              Show version information\n"
 		"\n"
 		"  user add USER        Add a user\n"
+		"  user set USER        Add or update a user\n"
 		"  user delete USER     Delete a user\n"
 		"  user update USER     Update a user password\n"
 		"  user list            List all users\n"
 		"\n"
 		"  share add SHARE      Add a share\n"
+		"  share set SHARE      Add or update a share\n"
 		"  share delete SHARE   Delete a share\n"
 		"  share update SHARE   Update a share\n"
-		"  share list           List all shares\n"
+		"  share list [--live]  List all shares (--live queries running daemon)\n"
 		"  share show SHARE     Show share configuration\n"
 		"\n"
 		"  debug set COMP       Toggle debug for component\n"
@@ -77,6 +79,16 @@ static const struct option global_opts[] = {
 	{"verbose",	no_argument,		NULL,	'v' },
 	{"version",	no_argument,		NULL,	'V' },
 	{"help",	no_argument,		NULL,	'h' },
+	{NULL,		0,			NULL,	 0  }
+};
+
+static const struct option user_mod_opts[] = {
+	{"password",	required_argument,	NULL,	'p' },
+	{NULL,		0,			NULL,	 0  }
+};
+
+static const struct option share_mod_opts[] = {
+	{"option",	required_argument,	NULL,	'o' },
 	{NULL,		0,			NULL,	 0  }
 };
 
@@ -108,7 +120,7 @@ static int notify_mountd(void)
 }
 
 /*
- * ksmbdctl start [--port PORT] [--nodetach[=WAY]] [--json-log]
+ * ksmbdctl start [--foreground] [--port PORT] [--nodetach[=WAY]] [--json-log]
  */
 static int cmd_start(int argc, char **argv)
 {
@@ -123,6 +135,7 @@ static int cmd_stop(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
+	tool_main = control_main;
 	return control_shutdown() ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
@@ -133,6 +146,7 @@ static int cmd_reload(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
+	tool_main = control_main;
 	return control_reload() ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
@@ -143,6 +157,7 @@ static int cmd_status(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
+	tool_main = control_main;
 	return control_status() ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
@@ -153,7 +168,9 @@ static int cmd_features(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
-	return control_features() ? EXIT_FAILURE : EXIT_SUCCESS;
+	tool_main = control_main;
+	return control_features(get_pwddb(), get_smbconf()) ?
+		EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 /*
@@ -163,6 +180,7 @@ static int cmd_version(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
+	tool_main = control_main;
 	show_version();
 	control_show_version();
 	return EXIT_SUCCESS;
@@ -185,7 +203,7 @@ static int cmd_user_add(int argc, char **argv)
 	/* argv[0] is "add", parse options starting from argv[1] */
 	optind = 1;
 	int c;
-	while ((c = getopt(argc, argv, "p:")) != EOF) {
+	while ((c = getopt_long(argc, argv, "p:", user_mod_opts, NULL)) != EOF) {
 		switch (c) {
 		case 'p':
 			g_free(password);
@@ -217,6 +235,70 @@ static int cmd_user_add(int argc, char **argv)
 	ret = command_add_user(g_strdup(get_pwddb()),
 			       g_strdup(name),
 			       g_steal_pointer(&password));
+	if (!ret)
+		notify_mountd();
+out:
+	remove_config();
+	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
+static int cmd_user_set(int argc, char **argv)
+{
+	int ret;
+	g_autofree char *password = NULL;
+	char *name;
+	struct ksmbd_user *user;
+
+	if (argc < 2) {
+		pr_err("Usage: ksmbdctl user set [-p PWD] USER\n");
+		return EXIT_FAILURE;
+	}
+
+	/* argv[0] is "set", parse options starting from argv[1] */
+	optind = 1;
+	int c;
+	while ((c = getopt_long(argc, argv, "p:", user_mod_opts, NULL)) != EOF) {
+		switch (c) {
+		case 'p':
+			g_free(password);
+			password = g_strdup(optarg);
+			break;
+		default:
+			pr_err("Usage: ksmbdctl user set [-p PWD] USER\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (optind >= argc) {
+		pr_err("Usage: ksmbdctl user set [-p PWD] USER\n");
+		return EXIT_FAILURE;
+	}
+
+	name = argv[optind];
+	if (!usm_user_name(name, strchr(name, 0x00))) {
+		pr_err("Invalid user name `%s'\n", name);
+		return EXIT_FAILURE;
+	}
+
+	tool_main = adduser_main;
+	ret = load_config(get_pwddb(), get_smbconf());
+	if (ret)
+		goto out;
+
+	user = usm_lookup_user(name);
+	if (user) {
+		put_ksmbd_user(user);
+		/* command_update_user() takes ownership and frees all args */
+		ret = command_update_user(g_strdup(get_pwddb()),
+					  g_strdup(name),
+					  g_steal_pointer(&password));
+	} else {
+		/* command_add_user() takes ownership and frees all args */
+		ret = command_add_user(g_strdup(get_pwddb()),
+				       g_strdup(name),
+				       g_steal_pointer(&password));
+	}
+
 	if (!ret)
 		notify_mountd();
 out:
@@ -270,7 +352,7 @@ static int cmd_user_update(int argc, char **argv)
 	/* argv[0] is "update", parse options starting from argv[1] */
 	optind = 1;
 	int c;
-	while ((c = getopt(argc, argv, "p:")) != EOF) {
+	while ((c = getopt_long(argc, argv, "p:", user_mod_opts, NULL)) != EOF) {
 		switch (c) {
 		case 'p':
 			g_free(password);
@@ -340,6 +422,7 @@ static void user_usage(void)
 		"\n"
 		"Commands:\n"
 		"  add [-p PWD] USER    Add a user\n"
+		"  set [-p PWD] USER    Add or update a user\n"
 		"  delete USER          Delete a user\n"
 		"  update [-p PWD] USER Update a user password\n"
 		"  list                 List all users\n");
@@ -354,6 +437,8 @@ static int cmd_user(int argc, char **argv)
 
 	if (!strcmp(argv[0], "add"))
 		return cmd_user_add(argc, argv);
+	if (!strcmp(argv[0], "set"))
+		return cmd_user_set(argc, argv);
 	if (!strcmp(argv[0], "delete"))
 		return cmd_user_delete(argc - 1, argv + 1);
 	if (!strcmp(argv[0], "update"))
@@ -385,7 +470,7 @@ static int cmd_share_add(int argc, char **argv)
 	/* argv[0] is "add", parse options starting from argv[1] */
 	optind = 1;
 	int c;
-	while ((c = getopt(argc, argv, "o:")) != EOF) {
+	while ((c = getopt_long(argc, argv, "o:", share_mod_opts, NULL)) != EOF) {
 		switch (c) {
 		case 'o':
 			gptrarray_printf(__options, "%s", optarg);
@@ -419,6 +504,71 @@ static int cmd_share_add(int argc, char **argv)
 	ret = command_add_share(g_strdup(get_smbconf()),
 				g_strdup(name),
 				g_steal_pointer(&options));
+	if (!ret)
+		notify_mountd();
+out:
+	remove_config();
+	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
+static int cmd_share_set(int argc, char **argv)
+{
+	int ret;
+	char *name;
+	g_auto(GStrv) options = NULL;
+	g_autoptr(GPtrArray) __options =
+		g_ptr_array_new_with_free_func(g_free);
+
+	if (argc < 2) {
+		pr_err("Usage: ksmbdctl share set [-o OPT]... SHARE\n");
+		return EXIT_FAILURE;
+	}
+
+	/* argv[0] is "set", parse options starting from argv[1] */
+	optind = 1;
+	int c;
+	while ((c = getopt_long(argc, argv, "o:", share_mod_opts, NULL)) != EOF) {
+		switch (c) {
+		case 'o':
+			gptrarray_printf(__options, "%s", optarg);
+			break;
+		default:
+			pr_err("Usage: ksmbdctl share set [-o OPT]... SHARE\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (optind >= argc) {
+		pr_err("Usage: ksmbdctl share set [-o OPT]... SHARE\n");
+		return EXIT_FAILURE;
+	}
+
+	name = argv[optind];
+	options = gptrarray_to_strv(__options);
+	__options = NULL;
+
+	if (!shm_share_name(name, strchr(name, 0x00))) {
+		pr_err("Invalid share name `%s'\n", name);
+		return EXIT_FAILURE;
+	}
+
+	tool_main = addshare_main;
+	ret = load_config(get_pwddb(), get_smbconf());
+	if (ret)
+		goto out;
+
+	if (g_hash_table_lookup(parser.groups, name)) {
+		/* command_update_share() takes ownership and frees all args */
+		ret = command_update_share(g_strdup(get_smbconf()),
+					   g_strdup(name),
+					   g_steal_pointer(&options));
+	} else {
+		/* command_add_share() takes ownership and frees all args */
+		ret = command_add_share(g_strdup(get_smbconf()),
+					g_strdup(name),
+					g_steal_pointer(&options));
+	}
+
 	if (!ret)
 		notify_mountd();
 out:
@@ -474,7 +624,7 @@ static int cmd_share_update(int argc, char **argv)
 	/* argv[0] is "update", parse options starting from argv[1] */
 	optind = 1;
 	int c;
-	while ((c = getopt(argc, argv, "o:")) != EOF) {
+	while ((c = getopt_long(argc, argv, "o:", share_mod_opts, NULL)) != EOF) {
 		switch (c) {
 		case 'o':
 			gptrarray_printf(__options, "%s", optarg);
@@ -515,11 +665,37 @@ out:
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
+static void __list_share_cb(gpointer key, gpointer value, gpointer data)
+{
+	struct smbconf_group *group = value;
+
+	(void)key;
+	(void)data;
+
+	if (!strcmp(group->name, "global") || !strcmp(group->name, "IPC$"))
+		return;
+
+	printf("%s\n", group->name);
+}
+
 static int cmd_share_list(int argc, char **argv)
 {
-	(void)argc;
-	(void)argv;
-	return control_list() ? EXIT_FAILURE : EXIT_SUCCESS;
+	int ret;
+
+	/* --live queries the running daemon instead of the config file */
+	if (argc >= 1 && (!strcmp(argv[0], "--live") || !strcmp(argv[0], "-l")))
+		return control_list() ? EXIT_FAILURE : EXIT_SUCCESS;
+
+	tool_main = addshare_main;
+	ret = load_config(get_pwddb(), get_smbconf());
+	if (ret) {
+		remove_config();
+		return EXIT_FAILURE;
+	}
+
+	g_hash_table_foreach(parser.groups, __list_share_cb, NULL);
+	remove_config();
+	return EXIT_SUCCESS;
 }
 
 static void __show_share_kv_cb(gpointer key, gpointer value, gpointer data)
@@ -567,9 +743,10 @@ static void share_usage(void)
 		"\n"
 		"Commands:\n"
 		"  add [-o OPT]... SHARE   Add a share\n"
+		"  set [-o OPT]... SHARE   Add or update a share\n"
 		"  delete SHARE            Delete a share\n"
 		"  update [-o OPT]... SHARE Update a share\n"
-		"  list                    List all shares\n"
+		"  list [--live]           List all shares (--live queries running daemon)\n"
 		"  show SHARE              Show share configuration\n");
 }
 
@@ -582,6 +759,8 @@ static int cmd_share(int argc, char **argv)
 
 	if (!strcmp(argv[0], "add"))
 		return cmd_share_add(argc, argv);
+	if (!strcmp(argv[0], "set"))
+		return cmd_share_set(argc, argv);
 	if (!strcmp(argv[0], "delete"))
 		return cmd_share_delete(argc - 1, argv + 1);
 	if (!strcmp(argv[0], "update"))

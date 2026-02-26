@@ -1,13 +1,13 @@
 .TH KSMBD.CONF "5" "" "ksmbd-tools @ksmbd_tools_version@" "File Formats and Conventions"
 .SH NAME
-ksmbd.conf \- the configuration file for ksmbd.mountd
+ksmbd.conf \- the configuration file used by ksmbdctl
 .SH DESCRIPTION
-\fBksmbd.conf\fR is the configuration file for \fBksmbd.mountd\fR(8) user mode daemon.
-\fBksmbd.addshare\fR(8) can be used for configuring shares for \fBksmbd.conf\fR.
-\fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
-\fBksmbd.addshare\fR notifies \fBksmbd.mountd\fR of changes, if it had made any, by sending the \fBSIGHUP\fR signal to \fBksmbd.mountd\fR.
-Changes made with \fBksmbd.addshare\fR will never require restarting \fBksmbd.mountd\fR and \fBksmbd\fR to take effect.
-\fBksmbd.control \-\-reload\fR can be used for notifying \fBksmbd.mountd\fR of changes when not using \fBksmbd.addshare\fR.
+\fBksmbd.conf\fR is the configuration file used by the ksmbd userspace daemon.
+\fBksmbdctl share\fR can be used for configuring shares in \fBksmbd.conf\fR.
+\fBksmbdctl share\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
+\fBksmbdctl share\fR notifies the daemon of changes, if it had made any, by sending \fBSIGHUP\fR.
+Changes made with \fBksmbdctl share\fR will never require restarting ksmbd to take effect.
+\fBksmbdctl reload\fR can be used for notifying the daemon of changes when not using \fBksmbdctl share\fR.
 \fBksmbd.conf\fR is expected to be at \fB@sysconfdir@/ksmbd/ksmbd.conf\fR by default. \" PATH_SMBCONF
 A configuration file that may serve as an example can be found at \fB@sysconfdir@/ksmbd/ksmbd.conf.example\fR.
 .SH "FILE FORMAT"
@@ -508,6 +508,4 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 \fBksmbdctl\fR(8)
 .TP
 \fBUtilities\fR
-\fBksmbd.addshare\fR(8),
-\fBksmbd.adduser\fR(8),
-\fBksmbd.mountd\fR(8)
+\fBksmbdctl\fR(8)

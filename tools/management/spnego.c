@@ -74,8 +74,8 @@ void spnego_destroy(void)
 	}
 }
 
-static int compare_oid(unsigned long *oid1, unsigned int oid1len,
-		    unsigned long *oid2, unsigned int oid2len)
+static int compare_oid(const unsigned long *oid1, unsigned int oid1len,
+		       const unsigned long *oid2, unsigned int oid2len)
 {
 	unsigned int i;
 
@@ -217,9 +217,9 @@ static int decode_negTokenInit(unsigned char *negToken, int token_len,
 	return 0;
 }
 
-static int encode_negTokenTarg(char *in_blob, int in_len,
+static int encode_negTokenTarg(const unsigned char *in_blob, unsigned int in_len,
 			const unsigned long *oid, int oid_len,
-			char **out_blob, int *out_len)
+			char **out_blob, unsigned int *out_len)
 {
 	unsigned char *buf;
 	unsigned char *sup_oid, *krb5_oid;
@@ -240,12 +240,12 @@ static int encode_negTokenTarg(char *in_blob, int in_len,
 	rep_token_len += 2 + in_len;
 	rep_token_len = asn1_header_len(rep_token_len, 3);
 
-	*out_len = asn1_header_len(
+	*out_len = (unsigned int)asn1_header_len(
 			neg_result_len + sup_mech_len + rep_token_len, 2);
 	*out_blob = g_try_malloc0(*out_len);
 	if (*out_blob == NULL)
 		return -ENOMEM;
-	buf = *out_blob;
+	buf = (unsigned char *)*out_blob;
 
 	/* negTokenTarg */
 	len = *out_len;
@@ -311,7 +311,8 @@ int spnego_handle_authen_request(struct ksmbd_spnego_authen_request *req,
 {
 	struct spnego_mech_ctx *mech_ctx;
 	unsigned char *mech_token;
-	int token_len, mech_type;
+	unsigned int token_len;
+	int mech_type;
 	int retval = 0;
 
 	if (decode_negTokenInit(req->spnego_blob, (int)req->spnego_blob_len,

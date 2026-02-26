@@ -51,11 +51,11 @@
 #define KRB5_OID_LEN  7
 #define KRB5U2U_OID_LEN  8
 #define MSKRB5_OID_LEN  7
-static unsigned long SPNEGO_OID[7] = { 1, 3, 6, 1, 5, 5, 2 };
-static unsigned long NTLMSSP_OID[10] = { 1, 3, 6, 1, 4, 1, 311, 2, 2, 10 };
-static unsigned long KRB5_OID[7] = { 1, 2, 840, 113554, 1, 2, 2 };
-static unsigned long KRB5U2U_OID[8] = { 1, 2, 840, 113554, 1, 2, 2, 3 };
-static unsigned long MSKRB5_OID[7] = { 1, 2, 840, 48018, 1, 2, 2 };
+extern const unsigned long SPNEGO_OID[SPNEGO_OID_LEN];
+extern const unsigned long NTLMSSP_OID[NTLMSSP_OID_LEN];
+extern const unsigned long KRB5_OID[KRB5_OID_LEN];
+extern const unsigned long KRB5U2U_OID[KRB5U2U_OID_LEN];
+extern const unsigned long MSKRB5_OID[MSKRB5_OID_LEN];
 
 /*
  * ASN.1 context.

@@ -12,16 +12,3 @@ addshare_lib = static_library(
     glib_dep,
   ],
 )
-
-configure_file(
-  input: 'ksmbd.addshare.8.in',
-  output: 'ksmbd.addshare.8',
-  install_dir: get_option('mandir') / 'man8',
-  configuration: in_data,
-)
-
-install_symlink(
-  'ksmbd.addshare',
-  install_dir: get_option('sbindir'),
-  pointing_to: 'ksmbdctl',
-)

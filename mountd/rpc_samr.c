@@ -9,6 +9,7 @@
 #include <endian.h>
 #include <glib.h>
 #include <errno.h>
+#include <limits.h>
 #include <linux/ksmbd_server.h>
 
 #include <management/user.h>
@@ -83,6 +84,7 @@ static int samr_connect5_invoke(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct ndr_uniq_char_ptr server_name;
+	__u32 val;
 
 	if (ndr_read_uniq_vstring_ptr(dce, &server_name))
 		return KSMBD_RPC_EINVALID_PARAMETER;
@@ -92,13 +94,19 @@ static int samr_connect5_invoke(struct ksmbd_rpc_pipe *pipe)
 	if (ndr_read_int32(dce, NULL))
 		return KSMBD_RPC_EINVALID_PARAMETER;
 	// level in
-	if (ndr_read_int32(dce, &dce->sm_req.level))
+	if (ndr_read_int32(dce, &val))
 		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (val > INT_MAX)
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	dce->sm_req.level = (int)val;
 	// Info in
 	if (ndr_read_int32(dce, NULL))
 		return KSMBD_RPC_EINVALID_PARAMETER;
-	if (ndr_read_int32(dce, &dce->sm_req.client_version))
+	if (ndr_read_int32(dce, &val))
 		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (val > INT_MAX)
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	dce->sm_req.client_version = (int)val;
 	return 0;
 }
 
@@ -295,13 +303,14 @@ static int samr_open_domain_return(struct ksmbd_rpc_pipe *pipe)
 static int samr_lookup_names_invoke(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
-	int user_num;
+	__u32 user_num;
 
 	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
 		return KSMBD_RPC_EINVALID_PARAMETER;
 
 	if (ndr_read_int32(dce, &user_num))
 		return KSMBD_RPC_EINVALID_PARAMETER;
+	(void)user_num;
 	// max count
 	if (ndr_read_int32(dce, NULL))
 		return KSMBD_RPC_EINVALID_PARAMETER;
@@ -716,7 +725,8 @@ static int samr_query_security_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
-	int sec_desc_len, curr_offset, payload_offset;
+	__u32 sec_desc_len;
+	int curr_offset, payload_offset;
 
 	ch = samr_ch_lookup(dce->sm_req.handle);
 	if (!ch)

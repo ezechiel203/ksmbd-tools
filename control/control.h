@@ -14,6 +14,6 @@ int control_list(void);
 int control_debug(char *comp);
 int control_show_version(void);
 int control_status(void);
-int control_features(void);
+int control_features(char *pwddb, char *smbconf);
 
 #endif /* __KSMBD_CONTROL_H__ */

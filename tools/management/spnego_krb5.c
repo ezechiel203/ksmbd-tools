@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -110,10 +111,14 @@ static int parse_service_full_name(char *service_full_name,
 	}
 	*host_name = g_strndup(name, delim - name);
 out:
+	if (!*service_name || !*host_name)
+		goto out_err;
+
 	/* we assume the host name is FQDN if it has "." */
 	if (strchr(*host_name, '.'))
 		return 0;
 
+out_err:
 	g_free(*service_name);
 	g_free(*host_name);
 	*service_name = NULL;
@@ -179,7 +184,7 @@ out_err:
 }
 
 static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
-			char *in_blob, unsigned int in_len,
+			const unsigned char *in_blob, unsigned int in_len,
 			struct ksmbd_spnego_auth_out *auth_out,
 			spnego_encode_t spnego_encode)
 {
@@ -194,7 +199,7 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 #else
 	krb5_authenticator authenti;
 #endif /* HAVE_KRB5_AUTH_CON_GETAUTHENTICATOR_DOUBLE_POINTER */
-	krb5_principal client;
+	krb5_principal client = NULL;
 	int retval = -EINVAL;
 	krb5_error_code krb_retval;
 
@@ -210,7 +215,7 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	}
 
 	packet.length = in_len;
-	packet.data = (krb5_pointer)in_blob;
+	packet.data = (krb5_pointer)(uintptr_t)in_blob;
 	krb_retval = krb5_rd_req(krb5_ctx->context, &auth_context, &packet,
 				krb5_ctx->creds.client, krb5_ctx->keytab,
 				NULL, &ticket);
@@ -251,11 +256,11 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 
 #ifndef HAVE_KRB5_AUTHENTICATOR_CLIENT
 	krb_retval = krb5_build_principal_ext(krb5_ctx->context, &client,
-			strlen(authenti->crealm), authenti->crealm, 0);
+				strlen(authenti->crealm), authenti->crealm, 0);
 	if (krb_retval) {
 		pr_krb5_err(krb5_ctx->context, krb_retval,
-				"while getting authenticator client\n");
-		goto out_free_auth;
+					"while getting authenticator client\n");
+		goto out_free_client;
 	}
 	krb_retval = copy_PrincipalName(&authenti->cname, &client->name);
 	if (krb_retval) {
@@ -295,9 +300,10 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	memcpy(auth_out->sess_key, KRB5_KEY_DATA(session_key), KRB5_KEY_LENGTH(session_key));
 	auth_out->key_len = KRB5_KEY_LENGTH(session_key);
 
-	if (spnego_encode(ap_rep.data, ap_rep.length,
-			mech_ctx->oid, mech_ctx->oid_len,
-			&auth_out->spnego_blob, &auth_out->blob_len)) {
+	if (spnego_encode((const unsigned char *)ap_rep.data,
+				ap_rep.length,
+				mech_ctx->oid, mech_ctx->oid_len,
+				&auth_out->spnego_blob, &auth_out->blob_len)) {
 		g_free(auth_out->user_name);
 		g_free(auth_out->sess_key);
 		goto out_free_client;
@@ -308,9 +314,9 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 
 out_free_client:
 #ifndef HAVE_KRB5_AUTHENTICATOR_CLIENT
-	krb5_free_principal(krb5_ctx->context, client);
+	if (client)
+		krb5_free_principal(krb5_ctx->context, client);
 #endif /* HAVE_KRB5_AUTHENTICATOR_CLIENT */
-out_free_auth:
 #ifdef HAVE_KRB5_AUTH_CON_GETAUTHENTICATOR_DOUBLE_POINTER
 	krb5_free_authenticator(krb5_ctx->context, authenti);
 #else

@@ -74,42 +74,51 @@ static const struct option opts[] = {
 
 int control_shutdown(void)
 {
-	int ret, fd;
+	int mountd_err = 0, ksmbd_err = 0, fd;
 
-	ret = cp_parse_lock();
-	if (!ret && kill(global_conf.pid, SIGTERM) < 0) {
-		ret = -errno;
-		pr_debug("Can't send SIGTERM to PID %d: %m\n",
-			 global_conf.pid);
+	/* Step 1: terminate the mountd daemon (best-effort) */
+	mountd_err = cp_parse_lock();
+	if (!mountd_err) {
+		if (kill(global_conf.pid, SIGTERM) < 0) {
+			mountd_err = -errno;
+			pr_debug("Can't send SIGTERM to PID %d: %m\n",
+				 global_conf.pid);
+		}
 	}
-	if (ret)
-		pr_err("Can't terminate mountd\n");
+	if (mountd_err)
+		pr_debug("Can't terminate mountd: %m\n");
 	else
 		pr_info("Terminated mountd\n");
 
+	/* Step 2: kill the kernel server */
 	fd = open(PATH_CLASS_ATTR_KILL_SERVER, O_WRONLY);
 	if (fd < 0) {
-		ret = -errno;
+		ksmbd_err = -errno;
 		pr_debug("Can't open `%s': %m\n",
 			 PATH_CLASS_ATTR_KILL_SERVER);
-		goto err_kill;
+		goto out;
 	}
 
 	if (write(fd, "hard", sizeof("hard") - 1) < 0) {
-		ret = -errno;
+		ksmbd_err = -errno;
 		pr_debug("Can't write `%s': %m\n",
 			 PATH_CLASS_ATTR_KILL_SERVER);
-		close(fd);
-		goto err_kill;
 	}
-
 	close(fd);
-	pr_info("Killed ksmbd\n");
-	return ret;
 
-err_kill:
-	pr_err("Can't kill ksmbd\n");
-	return ret;
+out:
+	if (ksmbd_err)
+		pr_err("Can't kill ksmbd\n");
+	else
+		pr_info("Killed ksmbd\n");
+
+	/*
+	 * Return success if the kernel server was killed, even if
+	 * mountd was already gone.  Both failing is the only true error.
+	 */
+	if (!ksmbd_err)
+		return 0;
+	return mountd_err ? mountd_err : ksmbd_err;
 }
 
 int control_reload(void)
@@ -400,14 +409,15 @@ static const char *signing_to_str(int signing)
 	}
 }
 
-int control_features(void)
+int control_features(char *pwddb, char *smbconf)
 {
 	int ret;
 	size_t i;
 
-	ret = load_config(PATH_PWDDB, PATH_SMBCONF);
+	ret = load_config(pwddb, smbconf);
 	if (ret) {
 		pr_err("Can't load configuration\n");
+		remove_config();
 		return ret;
 	}
 
@@ -459,7 +469,7 @@ int control_main(int argc, char **argv)
 			ret = control_status();
 			goto out;
 		case 'f':
-			ret = control_features();
+			ret = control_features(PATH_PWDDB, PATH_SMBCONF);
 			goto out;
 		case 'v':
 			set_log_level(PR_DEBUG);

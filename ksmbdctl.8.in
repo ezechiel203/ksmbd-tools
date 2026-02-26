@@ -275,6 +275,11 @@ If \fB\-p\fR is not given, the password is prompted interactively
 (with confirmation prompt).
 Fails if the user already exists.
 .TP
+\fBksmbdctl user set\fR [\fB\-p\fR \fI\,PWD\/\fR] \fI\,USER\/\fR
+Add \fI\,USER\/\fR if missing, or update the password if it already exists.
+This matches the legacy default behavior of \fBksmbd.adduser\fR
+when neither \fB\-\-add\fR nor \fB\-\-update\fR was specified.
+.TP
 \fBksmbdctl user delete\fR \fI\,USER\/\fR
 Delete \fI\,USER\/\fR from the user database.
 The user is removed from the database file immediately.
@@ -311,6 +316,11 @@ for each parameter, the current value (or default) is shown and can be
 accepted by pressing Enter, or replaced by typing a new value.
 Fails if the share already exists.
 .TP
+\fBksmbdctl share set\fR [\fB\-o\fR \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+Add \fI\,SHARE\/\fR if missing, or update it if it already exists.
+This matches the legacy default behavior of \fBksmbd.addshare\fR
+when neither \fB\-\-add\fR nor \fB\-\-update\fR was specified.
+.TP
 \fBksmbdctl share delete\fR \fI\,SHARE\/\fR
 Delete \fI\,SHARE\/\fR from the configuration file.
 When deleting the \fBglobal\fR section, its parameters are reset to
@@ -322,10 +332,10 @@ Update parameters for \fI\,SHARE\/\fR in the configuration file.
 Only the specified parameters are changed; unmentioned parameters
 retain their current values.
 .TP
-\fBksmbdctl share list\fR
-List all shares with their names and comments.
-Requires the daemon to be running (share listing uses a FIFO
-to communicate with the daemon via \fBSIGUSR1\fR).
+\fBksmbdctl share list\fR [\fB\-\-live\fR]
+Without \fB\-\-live\fR, list share names from \fBksmbd.conf\fR.
+With \fB\-\-live\fR, query the running daemon over FIFO/\fBSIGUSR1\fR
+and list active share configuration from userspace daemon state.
 .TP
 \fBksmbdctl share show\fR \fI\,SHARE\/\fR
 Show all configuration parameters for \fI\,SHARE\/\fR, including defaults
@@ -813,7 +823,7 @@ Watch kernel logs: \fBjournalctl \-kf \-u ksmbd\fR.
 .IP \(bu 3
 Check daemon logs: \fBjournalctl \-u ksmbd \-f\fR.
 .IP \(bu 3
-List active shares: \fBksmbdctl share list\fR.
+List active shares: \fBksmbdctl share list \-\-live\fR.
 .SS "Backup and Restore"
 The entire ksmbd configuration consists of two files:
 .IP \(bu 3
@@ -845,7 +855,7 @@ Contains the daemon PID; used by \fBstop\fR and \fBreload\fR commands.
 \fB@runstatedir@/ksmbd.fifo\fR
 Named pipe used for share listing communication between the control
 tool and the daemon.
-Created dynamically when \fBshare list\fR is invoked.
+Created dynamically when \fBshare list \-\-live\fR is invoked.
 .TP
 \fB/sys/class/ksmbd\-control/kill_server\fR
 Sysfs attribute to shut down the ksmbd kernel server.
@@ -969,14 +979,12 @@ ksmbdctl user list
 # Delete a user
 ksmbdctl user delete bob
 .fi
-.SH "BACKWARD COMPATIBILITY"
+.SH "REMOVED LEGACY COMMANDS"
 The legacy command names \fBksmbd.addshare\fR, \fBksmbd.adduser\fR,
-\fBksmbd.control\fR, and \fBksmbd.mountd\fR are installed as symlinks
-to \fBksmbdctl\fR and continue to work with their original syntax.
-When invoked via a legacy name, the tool behaves identically to
-the original command.
+\fBksmbd.control\fR, and \fBksmbd.mountd\fR are no longer installed.
+Invoke \fBksmbdctl\fR directly.
 .PP
-Mapping of legacy commands to \fBksmbdctl\fR subcommands:
+Migration mapping:
 .TS
 l l.
 Legacy Command	Equivalent
@@ -986,17 +994,17 @@ ksmbd.control \-\-shutdown	ksmbdctl stop
 ksmbd.control \-\-reload	ksmbdctl reload
 ksmbd.control \-\-debug=COMP	ksmbdctl debug set COMP
 ksmbd.control \-\-ksmbd\-version	ksmbdctl version
-ksmbd.control \-\-list	ksmbdctl share list
+ksmbd.control \-\-list	ksmbdctl share list \-\-live
 ksmbd.control \-\-status	ksmbdctl status
 ksmbd.control \-\-features	ksmbdctl features
+ksmbd.adduser USER	ksmbdctl user set USER
 ksmbd.adduser \-a USER	ksmbdctl user add USER
 ksmbd.adduser \-d USER	ksmbdctl user delete USER
 ksmbd.adduser \-u USER	ksmbdctl user update USER
-ksmbd.adduser \-l	ksmbdctl user list
+ksmbd.addshare SHARE	ksmbdctl share set SHARE
 ksmbd.addshare \-a SHARE	ksmbdctl share add SHARE
 ksmbd.addshare \-d SHARE	ksmbdctl share delete SHARE
 ksmbd.addshare \-u SHARE	ksmbdctl share update SHARE
-ksmbd.addshare \-l SHARE	ksmbdctl share show SHARE
 .TE
 .SH SIGNALS
 When running in daemon mode (\fBksmbdctl start\fR), the daemon responds to:
@@ -1007,7 +1015,7 @@ Sets the \fBKSMBD_SHOULD_RELOAD_CONFIG\fR flag internally.
 .TP
 \fBSIGUSR1\fR
 Write share listing to the named pipe (\fBksmbd.fifo\fR).
-Used internally by \fBksmbdctl share list\fR.
+Used internally by \fBksmbdctl share list \-\-live\fR.
 Sets the \fBKSMBD_SHOULD_LIST_CONFIG\fR flag.
 .TP
 \fBSIGTERM\fR, \fBSIGINT\fR, \fBSIGQUIT\fR

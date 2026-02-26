@@ -29,7 +29,16 @@ Dependencies for RHEL and its derivatives: `git` `gcc` `pkgconf` `autoconf`
 `automake` `libtool` `make` `meson` `ninja-build` `gawk` `libnl3-devel`  
 `glib2-devel`
 
-Example build and install:
+Managed `/opt/usr` install with rollback support:
+```sh
+cd ksmbd-tools
+sudo ./scripts/install_ksmbd_tools_optusr.sh
+
+# later, uninstall and restore pre-install file state
+sudo /opt/usr/sbin/ksmbd-tools-uninstall-optusr
+```
+
+Example manual build and install:
 ```sh
 git clone https://github.com/cifsd-team/ksmbd-tools.git
 cd ksmbd-tools
@@ -82,10 +91,7 @@ respectively.
 
 Manual pages:
 ```sh
-man 8 ksmbd.addshare
-man 8 ksmbd.adduser
-man 8 ksmbd.control
-man 8 ksmbd.mountd
+man 8 ksmbdctl
 man 5 ksmbd.conf
 man 5 ksmbdpwd.db
 ```
@@ -101,18 +107,22 @@ Example session:
 # the utilities are in `/usr/sbin',
 # the default user database is `/etc/ksmbd/ksmbdpwd.db', and
 # the default configuration file is `/etc/ksmbd/ksmbd.conf'.
+#
+# If you used `scripts/install_ksmbd_tools_optusr.sh',
+# the utilities are in `/opt/usr/sbin',
+# the default user database is `/opt/usr/etc/ksmbd/ksmbdpwd.db', and
+# the default configuration file is `/opt/usr/etc/ksmbd/ksmbd.conf'.
 
 # Create the share path directory.
 # The share stores files in this directory using its underlying filesystem.
 mkdir -vp $HOME/MyShare
 
 # Add a share to the default configuration file.
-# Note that `ksmbd.addshare' does not do variable expansion.
-# Without `--add', `ksmbd.addshare' will update `MyShare' if it exists.
-sudo ksmbd.addshare --add \
-                    --option "path = $HOME/MyShare" \
-                    --option 'read only = no' \
-                    MyShare
+# Note that `ksmbdctl share add' does not do variable expansion.
+sudo ksmbdctl share add \
+               --option "path = $HOME/MyShare" \
+               --option 'read only = no' \
+               MyShare
 
 # The default configuration file now has a new section for `MyShare'.
 #
@@ -126,21 +136,20 @@ sudo ksmbd.addshare --add \
 # `[global]' also has global parameters which are not share specific.
 
 # You can interactively update a share by omitting `--option'.
-# Without `--update', `ksmbd.addshare' will add `MyShare' if it does not exist.
-sudo ksmbd.addshare --update MyShare
+sudo ksmbdctl share update MyShare
 
 # Add a user to the default user database.
 # You will be prompted for a password.
-sudo ksmbd.adduser --add MyUser
+sudo ksmbdctl user add MyUser
 
 # There is no system user called `MyUser' so it has to be mapped to one.
 # We can force all users accessing the share to map to a system user and group.
 
 # Update share parameters of a share in the default configuration file.
-sudo ksmbd.addshare --update \
-                    --option "force user = $USER" \
-                    --option "force group = $USER" \
-                    MyShare
+sudo ksmbdctl share update \
+               --option "force user = $USER" \
+               --option "force group = $USER" \
+               MyShare
 
 # The default configuration file now has the updated share parameters.
 #
@@ -157,10 +166,10 @@ sudo modprobe ksmbd
 
 # Start the user and kernel mode daemons.
 # All interfaces are listened to by default.
-sudo ksmbd.mountd
+sudo ksmbdctl start
 
 # Mount the new share with cifs-utils and authenticate as the new user.
-# You will be prompted for the password given previously with `ksmbd.adduser'.
+# You will be prompted for the password given previously with `ksmbdctl user add'.
 sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
 
 # You can now access the share at `/mnt'.
@@ -171,24 +180,24 @@ sudo umount /mnt
 
 # Update the password of a user in the default user database.
 # `--password' can be used to give the password instead of prompting.
-sudo ksmbd.adduser --update --password MyNewPassword MyUser
+sudo ksmbdctl user update --password MyNewPassword MyUser
 
 # Delete a user from the default user database.
-sudo ksmbd.adduser --delete MyUser
+sudo ksmbdctl user delete MyUser
 
 # The utilities notify ksmbd.mountd of changes by sending it the SIGHUP signal.
 # This can be done manually when changes are made without using the utilities.
-sudo ksmbd.control --reload
+sudo ksmbdctl reload
 
 # Toggle ksmbd debug printing of the `smb' component.
-sudo ksmbd.control --debug smb
+sudo ksmbdctl debug set smb
 
 # Some changes require restarting the user and kernel mode daemons.
 # Modifying any global parameter is one example of such a change.
-# Restarting means starting `ksmbd.mountd' after shutting the daemons down.
+# Restarting means starting `ksmbdctl start' after shutting the daemons down.
 
 # Shutdown the user and kernel mode daemons.
-sudo ksmbd.control --shutdown
+sudo ksmbdctl stop
 
 # Remove the kernel module.
 sudo modprobe -r ksmbd

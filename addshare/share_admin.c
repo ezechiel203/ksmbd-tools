@@ -286,7 +286,7 @@ static GList *new_va_ml(GList *ml, char *p, const char *arg, ...)
 
 	ml = g_list_append(ml, g_strdup(p));
 	va_start(args, arg);
-	for (; arg; arg = va_arg(args, char *))
+	for (; arg; arg = va_arg(args, const char *))
 		if (!strncmp(arg, ml->data, strlen(ml->data)))
 			ml = g_list_append(ml, g_strdup(arg));
 	va_end(args);
@@ -343,7 +343,7 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE:
 	case KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS:
 	case KSMBD_SHARE_CONF_CONTINUOUS_AVAILABILITY:
-		ml = new_va_ml(ml, p, "yes", "no", NULL);
+		ml = new_va_ml(ml, p, "yes", "no", (const char *)NULL);
 		break;
 	case KSMBD_SHARE_CONF_GUEST_ACCOUNT:
 		ml = new_user_ml(ml, p);
@@ -364,7 +364,8 @@ static GList *new_conf_ml(GList *ml,
 		break;
 	case KSMBD_SHARE_CONF_VFS_OBJECTS:
 		p = __rtrim_list(buf, p + *buflen);
-		ml = new_va_ml(ml, p, "acl_xattr", "streams_xattr", NULL);
+		ml = new_va_ml(ml, p, "acl_xattr", "streams_xattr",
+			       (const char *)NULL);
 		break;
 	default:
 		break;
@@ -382,7 +383,7 @@ static int __prompt_options_stdin(char **options, int is_global)
 	g_autoptr(GList) ml = NULL;
 	struct termios term, raw_term;
 	enum KSMBD_SHARE_CONF conf;
-	int is_ready, step, ccode, icode, licode, row, col;
+	int is_ready, step, ccode = 0, icode = 0, licode = 0, row = 0, col = 0;
 	char buf[LINE_MAX];
 	size_t buflen;
 

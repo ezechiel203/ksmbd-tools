@@ -14,16 +14,3 @@ adduser_lib = static_library(
     glib_dep,
   ],
 )
-
-configure_file(
-  input: 'ksmbd.adduser.8.in',
-  output: 'ksmbd.adduser.8',
-  install_dir: get_option('mandir') / 'man8',
-  configuration: in_data,
-)
-
-install_symlink(
-  'ksmbd.adduser',
-  install_dir: get_option('sbindir'),
-  pointing_to: 'ksmbdctl',
-)

@@ -29,18 +29,27 @@ libnl_dep = dependency(
   'libnl-genl-3.0',
   version: '>= 3.0',
 )
-systemd_dep = dependency(
-  'systemd',
-  required: false,
-  version: '>= 245',
-)
-libsystemd_dep = dependency(
-  'libsystemd',
-  required: false,
-)
+
+# systemd support (sd_notify + unit file) — respects -Dsystemd=disabled
+systemd_opt = get_option('systemd')
+if systemd_opt.disabled()
+  systemd_dep = dependency('', required: false)
+  libsystemd_dep = dependency('', required: false)
+else
+  systemd_dep = dependency(
+    'systemd',
+    required: false,
+    version: '>= 245',
+  )
+  libsystemd_dep = dependency(
+    'libsystemd',
+    required: systemd_opt,
+  )
+endif
 if libsystemd_dep.found()
   add_project_arguments('-DHAVE_SYSTEMD', language: 'c')
 endif
+
 krb5_dep = dependency(
   get_option('krb5_name'),
   required: get_option('krb5'),
@@ -129,14 +138,6 @@ install_data(
   install_dir: get_option('sysconfdir') / 'ksmbd',
 )
 
-systemdsystemunitdir = get_option('systemdsystemunitdir')
-if systemdsystemunitdir == ''
-  systemdsystemunitdir = systemd_dep.get_variable(
-    pkgconfig: 'systemdsystemunitdir',
-    default_value: '',
-  )
-endif
-
 in_data = configuration_data({
   'sbindir': get_option('prefix') / get_option('sbindir'),
   'sysconfdir': get_option('prefix') / get_option('sysconfdir'),
@@ -159,18 +160,114 @@ configure_file(
 )
 
 configure_file(
-  input: 'ksmbd.service.in',
-  output: 'ksmbd.service',
-  install_dir: systemdsystemunitdir,
-  configuration: in_data,
-)
-
-configure_file(
   input: 'ksmbdctl.8.in',
   output: 'ksmbdctl.8',
   install_dir: get_option('mandir') / 'man8',
   configuration: in_data,
 )
+
+# --- Init system integration ---
+
+# systemd
+systemdsystemunitdir = get_option('systemdsystemunitdir')
+if systemdsystemunitdir == ''
+  if systemd_dep.found()
+    systemdsystemunitdir = systemd_dep.get_variable(
+      pkgconfig: 'systemdsystemunitdir',
+      default_value: '',
+    )
+  endif
+endif
+
+if systemdsystemunitdir != ''
+  configure_file(
+    input: 'ksmbd.service.in',
+    output: 'ksmbd.service',
+    install_dir: systemdsystemunitdir,
+    configuration: in_data,
+  )
+endif
+
+# OpenRC
+openrc_opt = get_option('openrc')
+openrcinitdir = get_option('openrcinitdir')
+if openrcinitdir == ''
+  openrcinitdir = get_option('prefix') / get_option('sysconfdir') / 'init.d'
+endif
+
+if openrc_opt.enabled() or (openrc_opt.auto() and systemdsystemunitdir == '')
+  configure_file(
+    input: 'ksmbd.openrc.in',
+    output: 'ksmbd.openrc',
+    install_dir: openrcinitdir,
+    install_mode: 'rwxr-xr-x',
+    configuration: in_data,
+  )
+endif
+
+# runit
+runit_opt = get_option('runit')
+runitsvdir = get_option('runitsvdir')
+if runitsvdir == ''
+  runitsvdir = '/etc/sv'
+endif
+
+if runit_opt.enabled()
+  configure_file(
+    input: 'ksmbd.runit.run.in',
+    output: 'ksmbd.runit.run',
+    install_dir: runitsvdir / 'ksmbd',
+    install_mode: 'rwxr-xr-x',
+    configuration: in_data,
+  )
+  configure_file(
+    input: 'ksmbd.runit.finish.in',
+    output: 'ksmbd.runit.finish',
+    install_dir: runitsvdir / 'ksmbd',
+    install_mode: 'rwxr-xr-x',
+    configuration: in_data,
+  )
+endif
+
+# s6
+s6_opt = get_option('s6')
+s6svcdir = get_option('s6svcdir')
+if s6svcdir == ''
+  s6svcdir = '/etc/s6/sv'
+endif
+
+if s6_opt.enabled()
+  configure_file(
+    input: 'ksmbd.s6.run.in',
+    output: 'ksmbd.s6.run',
+    install_dir: s6svcdir / 'ksmbd',
+    install_mode: 'rwxr-xr-x',
+    configuration: in_data,
+  )
+  configure_file(
+    input: 'ksmbd.s6.type.in',
+    output: 'ksmbd.s6.type',
+    install_dir: s6svcdir / 'ksmbd',
+    configuration: in_data,
+  )
+endif
+
+# SysV/LSB init
+sysvinit_opt = get_option('sysvinit')
+sysvrcdir = get_option('sysvrcdir')
+if sysvrcdir == ''
+  sysvrcdir = get_option('prefix') / get_option('sysconfdir') / 'init.d'
+endif
+
+if sysvinit_opt.enabled()
+  configure_file(
+    input: 'ksmbd.sysvinit.in',
+    output: 'ksmbd.sysvinit',
+    install_dir: sysvrcdir,
+    install_mode: 'rwxr-xr-x',
+    configuration: in_data,
+  )
+endif
 
 subdir('addshare')
 subdir('adduser')

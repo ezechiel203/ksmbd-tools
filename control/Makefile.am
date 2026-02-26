@@ -4,18 +4,4 @@ AM_CFLAGS = -DSYSCONFDIR='"${sysconfdir}"' -DRUNSTATEDIR='"${runstatedir}"' \
 noinst_LIBRARIES = libcontrol.a
 libcontrol_a_SOURCES = control.c
 
-EXTRA_DIST = ksmbd.control.8.in \
-	     meson.build
-
-man_MANS = ksmbd.control.8
-$(man_MANS): %: %.in; @$(in_script) $< >$@
-
-CLEANFILES = $(man_MANS)
-
-install-exec-hook: uninstall-hook
-	$(MKDIR_P) $(DESTDIR)$(sbindir)
-	( cd $(DESTDIR)$(sbindir) && \
-	  $(LN_S) $(libexecdir)/ksmbd.tools ksmbd.control )
-
-uninstall-hook:
-	-rm $(DESTDIR)$(sbindir)/ksmbd.control
+EXTRA_DIST = meson.build

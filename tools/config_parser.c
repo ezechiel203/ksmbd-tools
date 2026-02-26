@@ -213,7 +213,7 @@ static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 	GMappedFile *file;
 	char *contents, *delim;
 	size_t len;
-	int fd, ret;
+	int fd, ret = 0;
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
@@ -778,6 +778,11 @@ static int is_a_user_password(char *entry)
 	int is_user_password;
 
 	delim = strchr(entry, ':');
+	if (!delim) {
+		pr_debug("Password delimiter is missing\n");
+		return 0;
+	}
+
 	is_user_password = usm_user_name(entry, delim);
 	if (!is_user_password)
 		goto out;
@@ -934,14 +939,27 @@ int cp_parse_subauth(void)
 				g_rand_int(rand),
 				i + 1 < num_subauth ? ':' : '\n');
 
+			if (!new_contents) {
+				ret = -ENOMEM;
+				break;
+			}
+
 			g_free(contents);
 			contents = new_contents;
 		}
 
+		if (!contents)
+			return ret;
+
 		if (ret == -ENOENT)
 			ret = set_conf_contents(PATH_SUBAUTH, contents);
 
-		*strchr(contents, '\n') = 0x00;
+		{
+			char *newline = strchr(contents, '\n');
+
+			if (newline)
+				*newline = 0x00;
+		}
 		add_subauth(contents);
 	}
 	return ret;
@@ -1018,10 +1036,18 @@ int cp_parse_lock(void)
 		g_autofree char *contents =
 			g_strdup_printf("%d\n", getpid());
 
+		if (!contents)
+			return -ENOMEM;
+
 		if (ret == -ENOENT || ret == -EINVAL)
 			ret = set_conf_contents(PATH_LOCK, contents);
 
-		*strchr(contents, '\n') = 0x00;
+		{
+			char *newline = strchr(contents, '\n');
+
+			if (newline)
+				*newline = 0x00;
+		}
 		add_lock(contents);
 	}
 	return ret;

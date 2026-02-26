@@ -23,6 +23,12 @@
 static GHashTable	*users_table;
 static GRWLock		users_table_lock;
 
+static int usm_is_valid_ipc_account(const __s8 *account)
+{
+	return strnlen((const char *)account, KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) <
+	       KSMBD_REQ_MAX_ACCOUNT_NAME_SZ;
+}
+
 static void kill_ksmbd_user(struct ksmbd_user *user)
 {
 	pr_debug("Kill user `%s' [0x%" PRIXPTR "]\n",
@@ -125,7 +131,7 @@ static struct ksmbd_user *new_ksmbd_user(char *name, char *pwd)
 		user->gid = e->pw_gid;
 	}
 
-	user->pass = base64_decode(user->pass_b64, &pass_sz);
+	user->pass = (char *)base64_decode(user->pass_b64, &pass_sz);
 	user->pass_sz = (int)pass_sz;
 
 	if (!e)
@@ -318,7 +324,7 @@ void usm_update_user_password(struct ksmbd_user *user, char *pwd)
 {
 	size_t pass_sz;
 	char *pass_b64 = g_strdup(pwd);
-	char *pass = base64_decode(pass_b64, &pass_sz);
+	char *pass = (char *)base64_decode(pass_b64, &pass_sz);
 
 	pr_debug("New password for user `%s' [0x%" PRIXPTR "]\n",
 		 user->name,
@@ -383,14 +389,14 @@ static void __handle_login_request(struct ksmbd_login_response *resp,
 		resp->status |= KSMBD_USER_FLAG_EXTENSION;
 
 	hash_sz = usm_copy_user_passhash(user,
-					 resp->hash,
+					 (char *)resp->hash,
 					 sizeof(resp->hash));
 	if (hash_sz < 0) {
 		resp->status = KSMBD_USER_FLAG_INVALID;
 	} else {
 		resp->hash_sz = (unsigned short)hash_sz;
 		if (usm_copy_user_account(user,
-					  resp->account,
+					  (char *)resp->account,
 					  sizeof(resp->account)))
 			resp->status = KSMBD_USER_FLAG_INVALID;
 	}
@@ -402,11 +408,17 @@ int usm_handle_login_request(struct ksmbd_login_request *req,
 	struct ksmbd_user *user = NULL;
 	int null_session = 0;
 
+	if (!usm_is_valid_ipc_account(req->account)) {
+		pr_err("Invalid login request: account is not NUL-terminated\n");
+		resp->status = KSMBD_USER_FLAG_INVALID;
+		return -EINVAL;
+	}
+
 	if (req->account[0] == '\0')
 		null_session = 1;
 
 	if (!null_session)
-		user = usm_lookup_user(req->account);
+		user = usm_lookup_user((char *)req->account);
 	if (user) {
 		__handle_login_request(resp, user);
 		put_ksmbd_user(user);
@@ -437,10 +449,15 @@ int usm_handle_login_request_ext(struct ksmbd_login_request *req,
 
 	resp->ngroups = 0;
 
+	if (!usm_is_valid_ipc_account(req->account)) {
+		pr_err("Invalid login ext request: account is not NUL-terminated\n");
+		return -EINVAL;
+	}
+
 	if (req->account[0] == '\0')
 		return 0;
 
-	user = usm_lookup_user(req->account);
+	user = usm_lookup_user((char *)req->account);
 	if (user) {
 		resp->ngroups = user->ngroups;
 		memcpy(resp->____payload, user->sgid,
@@ -455,7 +472,12 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 {
 	struct ksmbd_user *user;
 
-	user = usm_lookup_user(req->account);
+	if (!usm_is_valid_ipc_account(req->account)) {
+		pr_err("Invalid logout request: account is not NUL-terminated\n");
+		return -EINVAL;
+	}
+
+	user = usm_lookup_user((char *)req->account);
 	if (!user)
 		return -ENOENT;
 

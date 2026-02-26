@@ -88,6 +88,39 @@ AS_IF([test "x$with_systemdsystemunitdir" != xno], [
 ])
 
 AC_SUBST([systemdsystemunitdir])
+AM_CONDITIONAL([HAVE_SYSTEMD_UNITDIR], [test "x$systemdsystemunitdir" != x])
+
+AC_ARG_WITH([openrcinitdir],
+            [AC_HELP_STRING([--with-openrcinitdir@<:@=DIR@:>@],
+                            [Install OpenRC init script to DIR])],
+            [with_openrcinitdir=$withval],
+            [with_openrcinitdir=no])
+AC_SUBST([openrcinitdir], [$with_openrcinitdir])
+AM_CONDITIONAL([HAVE_OPENRC], [test "x$with_openrcinitdir" != xno])
+
+AC_ARG_WITH([runitsvdir],
+            [AC_HELP_STRING([--with-runitsvdir@<:@=DIR@:>@],
+                            [Install runit service to DIR])],
+            [with_runitsvdir=$withval],
+            [with_runitsvdir=no])
+AC_SUBST([runitsvdir], [$with_runitsvdir])
+AM_CONDITIONAL([HAVE_RUNIT], [test "x$with_runitsvdir" != xno])
+
+AC_ARG_WITH([s6svcdir],
+            [AC_HELP_STRING([--with-s6svcdir@<:@=DIR@:>@],
+                            [Install s6 service to DIR])],
+            [with_s6svcdir=$withval],
+            [with_s6svcdir=no])
+AC_SUBST([s6svcdir], [$with_s6svcdir])
+AM_CONDITIONAL([HAVE_S6], [test "x$with_s6svcdir" != xno])
+
+AC_ARG_WITH([sysvrcdir],
+            [AC_HELP_STRING([--with-sysvrcdir@<:@=DIR@:>@],
+                            [Install SysV init script to DIR])],
+            [with_sysvrcdir=$withval],
+            [with_sysvrcdir=no])
+AC_SUBST([sysvrcdir], [$with_sysvrcdir])
+AM_CONDITIONAL([HAVE_SYSVINIT], [test "x$with_sysvrcdir" != xno])
 
 save_LIBS=$LIBS
 LIBS=

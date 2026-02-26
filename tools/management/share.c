@@ -13,6 +13,8 @@
 #include <grp.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <errno.h>
+#include <limits.h>
 #include <arpa/inet.h>
 
 #include "config_parser.h"
@@ -140,7 +142,8 @@ int shm_share_name(char *name, char *p)
 		goto out;
 	}
 	for (; name < p; name++) {
-		is_name = cp_printable(name) && *name != '[' && *name != ']';
+		is_name = cp_printable(name) &&
+			  *name != '[' && *name != ']';
 		if (!is_name) {
 			pr_debug("Share name contains `%c' [0x%.2X]\n",
 				 *name,
@@ -438,13 +441,15 @@ static void add_hosts_map(struct ksmbd_share *share,
 			  enum share_hosts map,
 			  char **names)
 {
-	GHashTable **hosts_map;
+	GHashTable **hosts_map = NULL;
 	char **pp;
 
 	if (map == KSMBD_SHARE_HOSTS_ALLOW_MAP)
 		hosts_map = &share->hosts_allow_map;
 	else if (map == KSMBD_SHARE_HOSTS_DENY_MAP)
 		hosts_map = &share->hosts_deny_map;
+	else
+		return;
 
 	if (!*hosts_map)
 		*hosts_map = g_hash_table_new_full(g_str_hash,
@@ -469,6 +474,9 @@ static void add_hosts_map(struct ksmbd_share *share,
 static void make_veto_list(struct ksmbd_share *share)
 {
 	int i;
+
+	if (!share->veto_list || share->veto_list_sz <= 0)
+		return;
 
 	for (i = 0; i < share->veto_list_sz; i++) {
 		if (share->veto_list[i] == '/')
@@ -718,8 +726,18 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_VETO_FILES, &k, &v) &&
 	    !test_share_flag(share, KSMBD_SHARE_FLAG_PIPE)) {
-		share->veto_list = cp_get_group_kv_string(v + 1);
-		share->veto_list_sz = strlen(share->veto_list);
+		const char *veto = v;
+
+		/*
+		 * Historically values were slash-delimited (e.g. "/a/b/").
+		 * Skip a single leading slash if present, but never read past
+		 * the string when value is empty.
+		 */
+		if (*veto == '/')
+			veto++;
+
+		share->veto_list = cp_get_group_kv_string((char *)veto);
+		share->veto_list_sz = share->veto_list ? strlen(share->veto_list) : 0;
 		make_veto_list(share);
 	}
 
@@ -1037,24 +1055,39 @@ void shm_iter_shares(share_cb cb, void *data)
 
 int shm_share_config_payload_size(struct ksmbd_share *share)
 {
-	int sz = 1;
+	size_t sz = 0;
+	size_t veto_sz = 0;
+	size_t path_sz;
 
-	if (share && !test_share_flag(share, KSMBD_SHARE_FLAG_PIPE)) {
-		if (share->path)
-			sz += strlen(share->path);
-		if (global_conf.root_dir)
-			sz += strlen(global_conf.root_dir) + 1;
-		if (share->veto_list_sz)
-			sz += share->veto_list_sz + 1;
-	}
+	if (!share || test_share_flag(share, KSMBD_SHARE_FLAG_PIPE))
+		return 0;
 
-	return sz;
+	if (!share->path || !share->path[0])
+		return -EINVAL;
+
+	path_sz = strlen(share->path) + 1;
+	if (global_conf.root_dir)
+		path_sz += strlen(global_conf.root_dir);
+
+	if (share->veto_list && share->veto_list_sz > 0)
+		veto_sz = (size_t)share->veto_list_sz;
+	if (veto_sz)
+		sz += veto_sz + 1;
+	sz += path_sz;
+
+	if (sz > INT_MAX)
+		return -EOVERFLOW;
+
+	return (int)sz;
 }
 
 int shm_handle_share_config_request(struct ksmbd_share *share,
 				    struct ksmbd_share_config_response *resp)
 {
-	unsigned char *config_payload;
+	char *config_payload;
+	size_t payload_sz;
+	size_t remaining;
+	int ret;
 
 	if (!share)
 		return -EINVAL;
@@ -1067,29 +1100,52 @@ int shm_handle_share_config_request(struct ksmbd_share *share,
 	resp->force_uid = share->force_uid;
 	resp->force_gid = share->force_gid;
 	resp->time_machine_max_size = share->time_machine_max_size;
-	*resp->share_name = 0x00;
-	strncat(resp->share_name, share->name, KSMBD_REQ_MAX_SHARE_NAME - 1);
-	resp->veto_list_sz = share->veto_list_sz;
+	g_strlcpy((char *)resp->share_name, share->name, sizeof(resp->share_name));
+	resp->veto_list_sz = (share->veto_list && share->veto_list_sz > 0) ?
+			     share->veto_list_sz : 0;
 
 	if (test_share_flag(share, KSMBD_SHARE_FLAG_PIPE))
 		return 0;
 
-	if (!share->path)
-		return 0;
+	if (!share->path) {
+		resp->flags = KSMBD_SHARE_FLAG_INVALID;
+		resp->payload_sz = 0;
+		return -EINVAL;
+	}
 
-	config_payload = KSMBD_SHARE_CONFIG_VETO_LIST(resp);
+	payload_sz = (size_t)resp->payload_sz;
+	if (!payload_sz)
+		return -EINVAL;
+
+	config_payload = (char *)KSMBD_SHARE_CONFIG_VETO_LIST(resp);
+	remaining = payload_sz;
 	if (resp->veto_list_sz) {
+		size_t veto_sz = (size_t)resp->veto_list_sz;
+
+		if (veto_sz + 1 > remaining)
+			return -EINVAL;
+
 		memcpy(config_payload,
 		       share->veto_list,
 		       resp->veto_list_sz);
-		config_payload += resp->veto_list_sz + 1;
+		config_payload += veto_sz;
+		remaining -= veto_sz;
+
+		/* Delimiter between veto list blob and path string. */
+		*config_payload++ = '\0';
+		remaining--;
 	}
+
+	if (!remaining)
+		return -EINVAL;
+
 	if (global_conf.root_dir)
-		sprintf(config_payload,
-			"%s%s",
-			global_conf.root_dir,
-			share->path);
+		ret = g_snprintf(config_payload, remaining,
+				 "%s%s", global_conf.root_dir, share->path);
 	else
-		sprintf(config_payload, "%s", share->path);
+		ret = g_snprintf(config_payload, remaining, "%s", share->path);
+	if (ret < 0 || (size_t)ret >= remaining)
+		return -EINVAL;
+
 	return 0;
 }

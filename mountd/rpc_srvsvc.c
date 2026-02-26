@@ -9,6 +9,7 @@
 #include <endian.h>
 #include <glib.h>
 #include <errno.h>
+#include <limits.h>
 #include <linux/ksmbd_server.h>
 
 #include <management/share.h>
@@ -293,11 +294,13 @@ static int srvsvc_parse_share_info_req(struct ksmbd_dcerpc *dce,
 		return -EINVAL;
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL) {
-		int ptr;
+		__u32 ptr;
 		__u32 val;
 
 		/* Read union switch selector */
 		if (ndr_read_union_int32(dce, &val))
+			return -EINVAL;
+		if (val > INT_MAX)
 			return -EINVAL;
 		hdr->level = val;
 		// read container pointer ref id
@@ -324,10 +327,15 @@ static int srvsvc_parse_share_info_req(struct ksmbd_dcerpc *dce,
 	}
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_GET_SHARE_INFO) {
+		__u32 val;
+
 		if (ndr_read_vstring_ptr(dce, &hdr->share_name))
 			return -EINVAL;
-		if (ndr_read_int32(dce, &hdr->level))
+		if (ndr_read_int32(dce, &val))
 			return -EINVAL;
+		if (val > INT_MAX)
+			return -EINVAL;
+		hdr->level = val;
 		return 0;
 	}
 

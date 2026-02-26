@@ -5,8 +5,10 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 #include <memory.h>
+#include <string.h>
 #include <glib.h>
 #include <errno.h>
+#include <limits.h>
 #include <linux/ksmbd_server.h>
 
 #include <tools.h>
@@ -32,6 +34,11 @@ static GThreadPool *pool;
 		}						\
 		ret;						\
 	})
+
+static int ipc_string_terminated(const __s8 *s, size_t max_len)
+{
+	return strnlen((const char *)s, max_len) < max_len;
+}
 
 static int login_request(struct ksmbd_ipc_msg *msg)
 {
@@ -59,15 +66,18 @@ out:
 	return 0;
 }
 
-static int login_response_payload_sz(char *account)
+static int login_response_payload_sz(const __s8 *account)
 {
 	int payload_sz;
 	struct ksmbd_user *user;
 
+	if (!ipc_string_terminated(account, KSMBD_REQ_MAX_ACCOUNT_NAME_SZ))
+		return 0;
+
 	if (account[0] == '\0')
 		return 0;
 
-	user = usm_lookup_user(account);
+	user = usm_lookup_user((char *)account);
 	if (!user)
 		return 0;
 
@@ -110,6 +120,7 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_spnego_authen_request *req;
 	struct ksmbd_spnego_authen_response *resp;
 	struct ksmbd_ipc_msg *resp_msg = NULL;
+	struct ksmbd_ipc_msg *resp_msg_ext = NULL;
 	struct ksmbd_spnego_auth_out auth_out;
 	struct ksmbd_login_request login_req;
 	int retval = 0;
@@ -123,7 +134,11 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	resp->handle = req->handle;
 	resp->login_response.status = KSMBD_USER_FLAG_INVALID;
 
-	if (msg->sz <= sizeof(struct ksmbd_spnego_authen_request)) {
+	if (msg->sz < sizeof(struct ksmbd_spnego_authen_request)) {
+		retval = -EINVAL;
+		goto out;
+	}
+	if (req->spnego_blob_len > msg->sz - sizeof(struct ksmbd_spnego_authen_request)) {
 		retval = -EINVAL;
 		goto out;
 	}
@@ -134,13 +149,20 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 		goto out;
 	}
 
-	ipc_msg_free(resp_msg);
-	resp_msg = ipc_msg_alloc(sizeof(*resp) +
-			auth_out.key_len + auth_out.blob_len);
-	if (!resp_msg) {
+	if (auth_out.key_len > USHRT_MAX || auth_out.blob_len > USHRT_MAX) {
+		retval = -EOVERFLOW;
+		goto out_free_auth;
+	}
+
+	resp_msg_ext = ipc_msg_alloc(sizeof(*resp) + auth_out.key_len + auth_out.blob_len);
+	if (!resp_msg_ext) {
 		retval = -ENOMEM;
 		goto out_free_auth;
 	}
+
+	ipc_msg_free(resp_msg);
+	resp_msg = resp_msg_ext;
+	resp_msg_ext = NULL;
 
 	resp_msg->type = KSMBD_EVENT_SPNEGO_AUTHEN_RESPONSE;
 	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
@@ -148,9 +170,13 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	resp->login_response.status = KSMBD_USER_FLAG_INVALID;
 
 	/* login */
+	if (!auth_out.user_name) {
+		retval = -EINVAL;
+		goto out_free_auth;
+	}
 	login_req.handle = req->handle;
-	strncpy(login_req.account, auth_out.user_name,
-			sizeof(login_req.account));
+	g_strlcpy((char *)login_req.account, auth_out.user_name,
+		  sizeof(login_req.account));
 	usm_handle_login_request(&login_req, &resp->login_response);
 	if (!(resp->login_response.status & KSMBD_USER_FLAG_OK)) {
 		pr_info("Unable to login user `%s'\n", login_req.account);
@@ -208,13 +234,29 @@ static int share_config_request(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_share_config_response *resp;
 	struct ksmbd_share *share = NULL;
 	struct ksmbd_ipc_msg *resp_msg;
+	unsigned int handle = 0;
+	int valid_req;
+	int ret;
 	int payload_sz = 0;
 
 	req = KSMBD_IPC_MSG_PAYLOAD(msg);
-	if (VALID_IPC_MSG(msg, struct ksmbd_share_config_request)) {
-		share = shm_lookup_share(req->share_name);
+	valid_req = VALID_IPC_MSG(msg, struct ksmbd_share_config_request);
+	if (valid_req)
+		handle = req->handle;
+	if (valid_req &&
+	    ipc_string_terminated(req->share_name, sizeof(req->share_name))) {
+		share = shm_lookup_share((char *)req->share_name);
 		if (share)
 			payload_sz = shm_share_config_payload_size(share);
+	} else if (valid_req) {
+		pr_err("Invalid share config request: unterminated share name\n");
+	}
+	if (payload_sz < 0) {
+		pr_err("Invalid share config payload size %d for share `%s'\n",
+		       payload_sz, valid_req ? (char *)req->share_name : "(invalid)");
+		put_ksmbd_share(share);
+		share = NULL;
+		payload_sz = 0;
 	}
 
 	resp_msg = ipc_msg_alloc(sizeof(*resp) + payload_sz);
@@ -223,9 +265,17 @@ static int share_config_request(struct ksmbd_ipc_msg *msg)
 
 	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
 	resp->payload_sz = payload_sz;
-	shm_handle_share_config_request(share, resp);
+	if (share) {
+		ret = shm_handle_share_config_request(share, resp);
+		if (ret) {
+			pr_err("Failed to serialize share config for `%s`: %d\n",
+			       (char *)req->share_name, ret);
+			resp->flags = KSMBD_SHARE_FLAG_INVALID;
+			resp->veto_list_sz = 0;
+		}
+	}
 	resp_msg->type = KSMBD_EVENT_SHARE_CONFIG_RESPONSE;
-	resp->handle = req->handle;
+	resp->handle = handle;
 
 	ipc_msg_send(resp_msg);
 out:

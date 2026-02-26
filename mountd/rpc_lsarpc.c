@@ -10,6 +10,7 @@
 #include <glib.h>
 #include <pwd.h>
 #include <errno.h>
+#include <limits.h>
 #include <linux/ksmbd_server.h>
 
 #include <management/user.h>
@@ -435,14 +436,20 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct lsarpc_names_info *ni = NULL;
 	struct ndr_uniq_char_ptr username;
+	__u32 num_names_u32;
 	int num_names, i;
 
 	if (ndr_read_bytes(dce, dce->lr_req.handle, HANDLE_SIZE))
 		goto fail;
 
 	// num names
-	if (ndr_read_int32(dce, &num_names))
+	if (ndr_read_int32(dce, &num_names_u32))
 		goto fail;
+	if (num_names_u32 > INT_MAX)
+		goto fail;
+	if (num_names_u32 > dce->payload_sz / sizeof(__u32))
+		goto fail;
+	num_names = (int)num_names_u32;
 	// max count
 	if (ndr_read_int32(dce, NULL))
 		goto fail;
@@ -608,7 +615,11 @@ static int lsarpc_invoke(struct ksmbd_rpc_pipe *pipe)
 	int ret = KSMBD_RPC_ENOTIMPLEMENTED;
 
 	switch (pipe->dce->req_hdr.opnum) {
-	case LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO || LSARPC_OPNUM_CLOSE:
+	case LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO:
+		/*
+		 * DS_ROLE_GET_PRIMARY_DOMAIN_INFO and CLOSE both map to opnum 0.
+		 * Distinguish the request by fragment length.
+		 */
 		if (pipe->dce->hdr.frag_length == 26)
 			ret = lsarpc_get_primary_domain_info_invoke(pipe);
 		else
@@ -646,7 +657,7 @@ static int lsarpc_return(struct ksmbd_rpc_pipe *pipe,
 	dce->offset += sizeof(struct dcerpc_response_header);
 
 	switch (dce->req_hdr.opnum) {
-	case LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO || LSARPC_OPNUM_CLOSE:
+	case LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO:
 		if (dce->hdr.frag_length == 26)
 			status = lsarpc_get_primary_domain_info_return(pipe);
 		else

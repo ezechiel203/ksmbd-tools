@@ -20,16 +20,3 @@ mountd_lib = static_library(
     libsystemd_dep,
   ],
 )
-
-configure_file(
-  input: 'ksmbd.mountd.8.in',
-  output: 'ksmbd.mountd.8',
-  install_dir: get_option('mandir') / 'man8',
-  configuration: in_data,
-)
-
-install_symlink(
-  'ksmbd.mountd',
-  install_dir: get_option('sbindir'),
-  pointing_to: 'ksmbdctl',
-)

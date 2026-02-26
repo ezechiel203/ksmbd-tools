@@ -146,19 +146,19 @@ static void __md4_hash(char **password, size_t *sz)
 	struct md4_ctx mctx;
 
 	md4_init(&mctx);
-	md4_update(&mctx, *password, *sz);
+	md4_update(&mctx, (const unsigned char *)*password, *sz);
 	g_free(*password);
 
 	*sz = sizeof(mctx.hash) + 1;
 	*password = g_malloc0(*sz);
-	md4_final(&mctx, *password);
+	md4_final(&mctx, (unsigned char *)*password);
 }
 
 static void __base64_encode(char **password, size_t *sz)
 {
 	char *base64;
 
-	base64 = base64_encode(*password, *sz - 1);
+	base64 = base64_encode((unsigned char *)*password, *sz - 1);
 	g_free(*password);
 
 	*sz = strlen(base64) + 1;

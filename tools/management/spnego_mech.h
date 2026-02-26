@@ -16,15 +16,15 @@ enum {
 
 struct spnego_mech_ctx;
 
-typedef int (*spnego_encode_t)(char *in_blob, int in_len,
+typedef int (*spnego_encode_t)(const unsigned char *in_blob, unsigned int in_len,
 				const unsigned long *oid, int oid_len,
-				char **out_blob, int *out_len);
+				char **out_blob, unsigned int *out_len);
 
 struct spnego_mech_operations {
 	int (*setup)(struct spnego_mech_ctx *mech_ctx);
 	void (*cleanup)(struct spnego_mech_ctx *mech_ctx);
 	int (*handle_authen)(struct spnego_mech_ctx *mech_ctx,
-				char *in_blob, unsigned int in_len,
+				const unsigned char *in_blob, unsigned int in_len,
 				struct ksmbd_spnego_auth_out *auth_out,
 				spnego_encode_t encode);
 };
