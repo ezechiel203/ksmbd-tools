@@ -1,0 +1,1133 @@
+.TH KSMBDCTL "8" "" "ksmbd-tools 3.5.6" "System Administration"
+.SH NAME
+ksmbdctl \- unified management tool for the ksmbd in-kernel SMB server
+.SH SYNOPSIS
+.B ksmbdctl
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+\fBksmbdctl\fR is the unified management tool for \fBksmbd\fR, the in-kernel
+CIFS/SMB3 server for Linux.
+It replaces the individual \fBksmbd.addshare\fR, \fBksmbd.adduser\fR,
+\fBksmbd.control\fR, and \fBksmbd.mountd\fR tools with a single command
+using a subcommand-based interface.
+.PP
+\fBksmbdctl\fR manages user accounts, share configuration, server lifecycle,
+debugging, and feature inspection.
+It communicates with the \fBksmbd\fR kernel module via sysfs and Generic
+Netlink, and manages configuration files
+\fBksmbd.conf\fR(5) and \fBksmbdpwd.db\fR(5).
+.SH ARCHITECTURE
+\fBksmbd\fR uses a dual-space architecture that splits SMB processing between
+the Linux kernel and a userspace daemon:
+.SS "Kernel Module (ksmbd.ko)"
+The kernel module handles all performance-critical operations:
+.RS
+.IP \(bu 3
+\fBTransport\fR: TCP (port 445) and RDMA (SMB Direct) connection handling.
+.IP \(bu 3
+\fBProtocol\fR: SMB2/3 command parsing, response generation, and protocol
+negotiation (SMB2.0 through SMB3.1.1).
+.IP \(bu 3
+\fBVFS\fR: File I/O operations via the Linux VFS layer, including
+oplock/lease management for client-side caching.
+.IP \(bu 3
+\fBSecurity\fR: Message signing (HMAC-SHA256), transport encryption
+(AES-128-CCM/GCM), and pre-authentication integrity (SHA-512).
+.IP \(bu 3
+\fBWork Queue\fR: Asynchronous request processing with credit-based
+flow control.
+.RE
+.SS "Userspace Daemon (ksmbd.mountd)"
+The daemon handles complex, policy-driven operations:
+.RS
+.IP \(bu 3
+\fBAuthentication\fR: User credential verification against the password
+database (\fBksmbdpwd.db\fR), NTLM/NTLMv2 challenge-response, and
+Kerberos 5 via SPNEGO.
+.IP \(bu 3
+\fBShare Configuration\fR: Parsing \fBksmbd.conf\fR, applying share
+parameters, and enforcing access policies.
+.IP \(bu 3
+\fBRPC Services\fR: DCE/RPC operations such as NetShareEnum (share listing),
+NetServerGetInfo (server info), and WKSSVC (workstation services).
+.IP \(bu 3
+\fBSession Management\fR: User session lifecycle, tree connect/disconnect
+handling, and connection tracking.
+.RE
+.SS "IPC Channel (Generic Netlink)"
+The kernel module and daemon communicate over a Generic Netlink socket using
+the family name \fBSMBD_GENL\fR (version 0x01).
+.PP
+The kernel sends request events to the daemon, which processes them and
+sends back response events.
+Event types include:
+.TS
+l l l.
+Event	Direction	Purpose
+_
+HEARTBEAT_REQUEST	kernel\(->daemon	Liveness check
+LOGIN_REQUEST	kernel\(->daemon	User authentication
+LOGIN_REQUEST_EXT	kernel\(->daemon	Extended auth (Kerberos)
+SHARE_CONFIG_REQUEST	kernel\(->daemon	Share parameter lookup
+TREE_CONNECT_REQUEST	kernel\(->daemon	Share access check
+TREE_DISCONNECT_REQUEST	kernel\(->daemon	Cleanup on disconnect
+LOGOUT_REQUEST	kernel\(->daemon	Session cleanup
+RPC_REQUEST	kernel\(->daemon	DCE/RPC call dispatch
+SPNEGO_AUTHEN_REQUEST	kernel\(->daemon	SPNEGO/Kerberos auth
+STARTING_UP	daemon\(->kernel	Startup configuration
+SHUTTING_DOWN	daemon\(->kernel	Graceful shutdown
+.TE
+.PP
+During startup, the daemon sends a \fBSTARTING_UP\fR event containing the
+full server configuration (flags, protocol range, limits, interfaces,
+netbios name, workgroup, etc.) as a
+\fBksmbd_startup_request\fR structure.
+The kernel module uses this to initialize its internal state.
+.PP
+The daemon's receive buffer is 1\ MB (\fBKSMBD_IPC_SO_RCVBUF_SIZE\fR),
+and individual IPC messages may be up to 64\ KB
+(\fBKSMBD_IPC_MAX_MESSAGE_SIZE\fR).
+.SS "Data Flow"
+A typical SMB request traverses the following path:
+.PP
+.nf
+Client
+  \(da
+Transport Layer (TCP/RDMA)
+  \(da
+Protocol Processing (SMB2/3 command dispatch)
+  \(da
+\fI[if auth/share/RPC needed]\fR \(-> Netlink IPC \(-> ksmbd.mountd
+  \(da
+VFS Operations (file I/O via Linux VFS)
+  \(da
+Response Generation
+  \(da
+Client
+.fi
+.PP
+Hot-path file I/O (read, write, lock, close) stays entirely in kernel
+space for maximum throughput.
+Only operations requiring policy decisions (authentication, share
+config lookup, RPC calls) cross into userspace.
+.SS "Worker Thread Pool"
+The daemon processes IPC requests using a GLib thread pool.
+The pool size is controlled by the \fBmax worker threads\fR parameter
+in \fBksmbd.conf\fR(5) (default: 4, maximum: 64).
+Each incoming kernel request is pushed to the pool and dispatched to an
+available worker thread.
+.PP
+Worker threads handle:
+login requests, share config lookups, tree connect/disconnect,
+logout, RPC calls, SPNEGO authentication, and heartbeat responses.
+.SH "GLOBAL OPTIONS"
+These options may be given before any command.
+.TP
+\fB\-C\fR, \fB\-\-config\fR=\fI\,CONF\/\fR
+Use \fI\,CONF\/\fR as configuration file instead of \fB/usr/local/etc/ksmbd/ksmbd.conf\fR.
+.TP
+\fB\-P\fR, \fB\-\-pwddb\fR=\fI\,PWDDB\/\fR
+Use \fI\,PWDDB\/\fR as user database instead of \fB/usr/local/etc/ksmbd/ksmbdpwd.db\fR.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Be verbose. Enables debug-level logging to stderr or syslog.
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Output version information and exit.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Display help and exit.
+.SH COMMANDS
+.SS "Server Lifecycle"
+.TP
+\fBksmbdctl start\fR [\fB\-p\fR \fI\,PORT\/\fR] [\fB\-n\fR[\fI\,WAY\/\fR]] [\fB\-j\fR]
+Start the ksmbd daemon.
+This is equivalent to running \fBksmbd.mountd\fR.
+.RS
+.PP
+The startup sequence is:
+.IP 1. 3
+Parse command-line options and configuration files.
+.IP 2. 3
+Daemonize (unless \fB\-\-nodetach\fR is given): double-fork to detach from
+the controlling terminal, become session leader, redirect stdio to
+\fI/dev/null\fR, and switch to syslog logging.
+.IP 3. 3
+Write the PID to the lock file (\fB/usr/local/var/run/ksmbd.lock\fR).
+.IP 4. 3
+Initialize the Generic Netlink IPC channel (connect to family \fBSMBD_GENL\fR).
+.IP 5. 3
+Send the \fBSTARTING_UP\fR event to the kernel module with the full
+server configuration.
+.IP 6. 3
+Enter the main event loop, processing IPC events from the kernel.
+.PP
+\fBOptions:\fR
+.TP
+\fB\-p\fR, \fB\-\-port\fR=\fI\,PORT\/\fR
+Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR.
+Overrides the \fBtcp port\fR setting in \fBksmbd.conf\fR(5).
+.TP
+\fB\-n\fR, \fB\-\-nodetach\fR[=\fI\,WAY\/\fR]
+Do not detach process from foreground.
+If \fI\,WAY\/\fR is \fB1\fR (or omitted), become process group leader
+via \fBsetpgid\fR(2) but do not fork (default when flag is given).
+If \fI\,WAY\/\fR is \fB0\fR, daemonize normally.
+If \fI\,WAY\/\fR is greater than \fB1\fR, run entirely in the foreground
+without any process group change.
+.TP
+\fB\-j\fR, \fB\-\-json\-log\fR
+Output logs as JSON objects to stderr, one per line.
+Format: \fB{"ts":\fR\fIepoch\fR\fB,"level":"\fR\fIlevel\fR\fB","msg":"\fR\fItext\fR\fB"}\fR.
+Useful for log aggregation systems.
+.RE
+.TP
+\fBksmbdctl stop\fR
+Shut down both the ksmbd daemon and the kernel server.
+Reads the daemon PID from \fB/usr/local/var/run/ksmbd.lock\fR, sends
+\fBSIGTERM\fR to the daemon process, and writes \fB"hard"\fR to
+\fB/sys/class/ksmbd\-control/kill_server\fR to terminate the kernel
+server component.
+Active client connections are forcefully closed.
+.TP
+\fBksmbdctl reload\fR
+Notify the ksmbd daemon to reload its configuration.
+Sends \fBSIGHUP\fR to the daemon process.
+The daemon re-parses \fBksmbd.conf\fR and \fBksmbdpwd.db\fR.
+.PP
+.RS
+\fBNote:\fR Share parameters and user database changes take effect
+immediately after reload.
+However, global parameters that are part of the kernel startup
+configuration (protocol versions, signing mode, encryption mode,
+feature flags, connection limits, I/O sizes) only take effect after a
+full stop and start cycle, because they are sent to the kernel once
+during the \fBSTARTING_UP\fR event.
+.RE
+.TP
+\fBksmbdctl status\fR
+Display server status information:
+.RS
+.IP \(bu 3
+\fBModule loaded\fR: Whether \fB/sys/module/ksmbd\fR exists.
+.IP \(bu 3
+\fBModule version\fR: Read from \fB/sys/module/ksmbd/version\fR.
+.IP \(bu 3
+\fBDaemon PID\fR: Read from the lock file; verified alive with \fBkill\fR(2) signal 0.
+.IP \(bu 3
+\fBDebug components\fR: Current kernel debug state from \fB/sys/class/ksmbd\-control/debug\fR.
+.RE
+.TP
+\fBksmbdctl features\fR
+Display configured feature flags from \fBksmbd.conf\fR(5).
+Loads the configuration file and prints a table of features and their
+enabled/disabled state.
+.RS
+.PP
+Features reported:
+.TS
+l l.
+Feature	Config Key
+_
+SMB2 Leases	smb2 leases
+SMB2 Encryption	smb3 encryption
+SMB3 Multichannel	server multi channel support
+Durable Handles	durable handles
+Fruit Extensions	fruit extensions
+Fruit Zero File ID	fruit zero file id
+Fruit NFS ACEs	fruit nfs aces
+Fruit Copyfile	fruit copyfile
+.TE
+.PP
+Also shows: signing mode, protocol version range
+(min/max), and worker thread count.
+.RE
+.TP
+\fBksmbdctl version\fR
+Output version information for both the userspace tools
+(\fBksmbd-tools 3.5.6\fR) and
+the loaded ksmbd kernel module (read from \fB/sys/module/ksmbd/version\fR).
+.SS "User Management"
+.PP
+Users are stored in the \fBksmbdpwd.db\fR(5) password database.
+After any change (add, delete, update), the daemon is automatically
+notified to reload via \fBSIGHUP\fR.
+.PP
+\fBPassword storage:\fR
+Passwords are converted to UTF-16LE, hashed with MD4,
+and stored as Base64-encoded strings.
+The database file format is one user per line:
+\fIusername\fR\fB:\fR\fIbase64_hash\fR.
+.PP
+\fBUsername constraints:\fR
+Must be valid UTF-8, between 1 and 47 bytes
+(\fBKSMBD_REQ_MAX_ACCOUNT_NAME_SZ\fR = 48 including NUL),
+and must not contain a colon.
+Usernames are case-sensitive in the database.
+.PP
+\fBPassword constraints:\fR
+Maximum 128 characters (\fBMAX_NT_PWD_LEN\fR - 1).
+Must be valid UTF-8.
+.TP
+\fBksmbdctl user add\fR [\fB\-p\fR \fI\,PWD\/\fR] \fI\,USER\/\fR
+Add \fI\,USER\/\fR to the user database.
+If \fB\-p\fR is not given, the password is prompted interactively
+(with confirmation prompt).
+Fails if the user already exists.
+.TP
+\fBksmbdctl user set\fR [\fB\-p\fR \fI\,PWD\/\fR] \fI\,USER\/\fR
+Add \fI\,USER\/\fR if missing, or update the password if it already exists.
+This matches the legacy default behavior of \fBksmbd.adduser\fR
+when neither \fB\-\-add\fR nor \fB\-\-update\fR was specified.
+.TP
+\fBksmbdctl user delete\fR \fI\,USER\/\fR
+Delete \fI\,USER\/\fR from the user database.
+The user is removed from the database file immediately.
+Active sessions for the user are not terminated; they
+expire according to normal session timeouts.
+.TP
+\fBksmbdctl user update\fR [\fB\-p\fR \fI\,PWD\/\fR] \fI\,USER\/\fR
+Update the password for \fI\,USER\/\fR.
+If \fB\-p\fR is not given, the password is prompted interactively.
+Fails if the user does not exist.
+.TP
+\fBksmbdctl user list\fR
+List all users in the user database, one per line.
+Guest accounts (those matching the \fBguest account\fR parameter)
+are excluded from the listing.
+.SS "Share Management"
+.PP
+Shares are configured in \fBksmbd.conf\fR(5).
+After any change (add, delete, update), the daemon is automatically
+notified to reload via \fBSIGHUP\fR.
+.PP
+\fBShare name constraints:\fR
+Must be valid UTF-8, between 1 and 63 bytes
+(\fBKSMBD_REQ_MAX_SHARE_NAME\fR = 64 including NUL),
+and is case-insensitive.
+The names \fBglobal\fR and \fBipc$\fR are reserved.
+.TP
+\fBksmbdctl share add\fR [\fB\-o\fR \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+Add \fI\,SHARE\/\fR to the configuration file.
+Share parameters can be given with \fB\-o\fR (e.g., \fB\-o "path = /srv/share"\fR).
+This option can be given multiple times.
+If no \fB\-o\fR options are given, parameters are prompted interactively;
+for each parameter, the current value (or default) is shown and can be
+accepted by pressing Enter, or replaced by typing a new value.
+Fails if the share already exists.
+.TP
+\fBksmbdctl share set\fR [\fB\-o\fR \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+Add \fI\,SHARE\/\fR if missing, or update it if it already exists.
+This matches the legacy default behavior of \fBksmbd.addshare\fR
+when neither \fB\-\-add\fR nor \fB\-\-update\fR was specified.
+.TP
+\fBksmbdctl share delete\fR \fI\,SHARE\/\fR
+Delete \fI\,SHARE\/\fR from the configuration file.
+When deleting the \fBglobal\fR section, its parameters are reset to
+defaults rather than removed.
+Active connections to the share are not terminated.
+.TP
+\fBksmbdctl share update\fR [\fB\-o\fR \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+Update parameters for \fI\,SHARE\/\fR in the configuration file.
+Only the specified parameters are changed; unmentioned parameters
+retain their current values.
+.TP
+\fBksmbdctl share list\fR [\fB\-\-live\fR]
+Without \fB\-\-live\fR, list share names from \fBksmbd.conf\fR.
+With \fB\-\-live\fR, query the running daemon over FIFO/\fBSIGUSR1\fR
+and list active share configuration from userspace daemon state.
+.TP
+\fBksmbdctl share show\fR \fI\,SHARE\/\fR
+Show all configuration parameters for \fI\,SHARE\/\fR, including defaults
+for parameters not explicitly set.
+.SS "Debug Controls"
+.PP
+Debug components control kernel-level debug printing via
+\fB/sys/class/ksmbd\-control/debug\fR.
+Requires the ksmbd module to be loaded.
+Debug output appears in the kernel log, accessible via \fBdmesg\fR(1)
+or \fBjournalctl \-k\fR.
+.PP
+Available debug components and the subsystems they cover:
+.TS
+l l.
+Component	Covers
+_
+\fBsmb\fR	SMB protocol parsing, command dispatch, negotiation
+\fBauth\fR	Authentication, NTLM challenges, Kerberos/SPNEGO
+\fBvfs\fR	VFS operations (open, read, write, close, stat)
+\fBoplock\fR	Oplock/lease grants, breaks, and state transitions
+\fBipc\fR	Kernel-userspace netlink IPC messages
+\fBconn\fR	Connection lifecycle (accept, close, timeout)
+\fBrdma\fR	SMB Direct / RDMA transport operations
+\fBall\fR	All of the above simultaneously
+.TE
+.PP
+Components are toggled: enabling an already-enabled component disables it.
+Enabled components are shown enclosed in brackets (\fB[]\fR) in the debug
+output.
+.TP
+\fBksmbdctl debug set\fR \fI\,COMPONENT\/\fR
+Toggle debug printing for \fI\,COMPONENT\/\fR.
+After toggling, the current state of all components is displayed.
+.TP
+\fBksmbdctl debug show\fR
+Display currently enabled debug components without changing anything.
+.TP
+\fBksmbdctl debug off\fR
+Disable all debug output.
+.SS "Configuration"
+.TP
+\fBksmbdctl config show\fR [\fI\,SECTION\/\fR]
+Display the current configuration.
+Without \fI\,SECTION\/\fR, shows all sections (global and all shares).
+With \fI\,SECTION\/\fR, shows only that section
+(e.g., \fBksmbdctl config show global\fR).
+Parameters are shown in \fIkey\fR \fB=\fR \fIvalue\fR format.
+.TP
+\fBksmbdctl config validate\fR
+Parse and validate the configuration file and user database
+without starting the daemon.
+Checks for syntax errors, invalid parameter names, unknown
+sections, and reference integrity (e.g., users in \fBvalid users\fR
+existing in the password database).
+Reports errors on stderr and exits with status 0 if valid,
+or 1 if errors were found.
+.SH "AUTHENTICATION"
+\fBksmbd\fR supports multiple authentication mechanisms, negotiated during
+the SMB session setup phase.
+.SS "NTLM / NTLMv2"
+The default authentication method.
+The client sends an authentication request; the kernel module
+forwards it to the daemon via the \fBLOGIN_REQUEST\fR netlink event.
+The daemon looks up the user in \fBksmbdpwd.db\fR, computes the
+expected NTLM response, and returns either \fBKSMBD_USER_FLAG_OK\fR
+or \fBKSMBD_USER_FLAG_BAD_PASSWORD\fR in the \fBLOGIN_RESPONSE\fR.
+.PP
+Password hashes are stored as MD4(UTF-16LE(password)),
+Base64-encoded.
+The hash is 16 bytes (128 bits); the maximum hash field in
+the netlink message is 18 bytes (\fBKSMBD_REQ_MAX_HASH_SZ\fR).
+.SS "Kerberos 5 / SPNEGO"
+When \fBkerberos support = yes\fR is set in \fBksmbd.conf\fR(5):
+.IP 1. 3
+The server advertises Kerberos as a supported mechanism during
+SPNEGO negotiation.
+.IP 2. 3
+The client sends a Kerberos AP-REQ ticket.
+.IP 3. 3
+The kernel forwards it to the daemon via \fBSPNEGO_AUTHEN_REQUEST\fR.
+.IP 4. 3
+The daemon validates the ticket against the keytab file
+(configured via \fBkerberos keytab file\fR, default:
+\fB/etc/krb5.keytab\fR) using the service principal
+(configured via \fBkerberos service name\fR, default:
+\fBcifs/\fR\fIFQDN\fR).
+.IP 5. 3
+The result is sent back via \fBSPNEGO_AUTHEN_RESPONSE\fR.
+.PP
+Kerberos requires the daemon to be built with Kerberos 5 library support.
+.SS "Guest Access"
+Guest (anonymous) access is controlled by three parameters:
+.IP \(bu 3
+\fBguest ok\fR (per-share): Allow passwordless connections.
+.IP \(bu 3
+\fBguest account\fR (global/per-share): System user for guest sessions.
+.IP \(bu 3
+\fBmap to guest\fR (global): When to auto-map failed logins to guest.
+Set to \fBbad user\fR to map unknown usernames to guest automatically.
+.PP
+Guest connections run under the UID/GID of the system user specified by
+\fBguest account\fR (default: \fBnobody\fR).
+The \fBrestrict anonymous\fR parameter (0, 1, or 2) further restricts what
+anonymous connections can access.
+.SH "SECURITY MODEL"
+.SS "Message Signing"
+SMB2/3 message signing protects against man-in-the-middle attacks by
+computing an HMAC-SHA256 over each message.
+.PP
+Controlled by \fBserver signing\fR in \fBksmbd.conf\fR(5):
+.TS
+l l.
+Value	Behavior
+_
+\fBdisabled\fR	Never sign (fastest, least secure)
+\fBauto\fR	Sign if the client requests (default)
+\fBmandatory\fR	Require signing; reject unsigned clients
+.TE
+.PP
+Signing adds approximately 5\(en10% CPU overhead per message.
+For security-sensitive environments, use \fBmandatory\fR.
+.SS "Transport Encryption"
+SMB3 transport encryption (AES-128-CCM or AES-256-GCM, depending on
+protocol version) encrypts the entire SMB message payload.
+Requires SMB 3.0 or higher.
+.PP
+Controlled by \fBsmb3 encryption\fR in \fBksmbd.conf\fR(5):
+.TS
+l l.
+Value	Behavior
+_
+\fBdisabled\fR	Never encrypt; refuse encryption requests
+\fBauto\fR	Encrypt if the client requests (default)
+\fBmandatory\fR	Require encryption; SMB 2.x clients cannot connect
+.TE
+.PP
+Encryption is stronger than signing and makes signing redundant
+(encrypted messages include an authentication tag).
+.SS "Pre-Authentication Integrity (SMB 3.1.1)"
+SMB 3.1.1 clients and servers maintain a running SHA-512 hash of
+all negotiation messages before authentication completes.
+This prevents downgrade attacks and ensures both sides agreed on
+the same negotiation parameters.
+This is automatic and cannot be disabled for SMB 3.1.1 connections.
+.SS "Access Control"
+Access to shares is controlled at multiple layers:
+.IP 1. 3
+\fBAuthentication\fR: User must be in \fBksmbdpwd.db\fR (or
+guest access allowed).
+.IP 2. 3
+\fBUser ACL\fR: \fBvalid users\fR / \fBinvalid users\fR determine
+who can connect.
+\fBinvalid users\fR takes precedence.
+.IP 3. 3
+\fBHost ACL\fR: \fBhosts allow\fR / \fBhosts deny\fR restrict by
+source IP/CIDR.
+\fBhosts deny\fR takes precedence.
+When both are empty, all hosts are allowed.
+.IP 4. 3
+\fBPermission Level\fR: \fBread only\fR / \fBread list\fR /
+\fBwrite list\fR determine read/write access.
+Precedence: \fBread list\fR > \fBwrite list\fR > \fBread only\fR.
+.IP 5. 3
+\fBFilesystem Permissions\fR: Linux UID/GID/mode bits and optional
+ACL xattrs are enforced by the kernel.
+.PP
+The user identity used for filesystem operations is determined by:
+.RS
+.IP \(bu 3
+The authenticated user's UID/GID (looked up via \fBgetpwnam\fR(3)).
+.IP \(bu 3
+Override with \fBforce user\fR and/or \fBforce group\fR (per-share).
+.IP \(bu 3
+New file permissions: (\fIrequested\fR AND \fBcreate mask\fR) OR
+\fBforce create mode\fR.
+.IP \(bu 3
+New directory permissions: (\fIrequested\fR AND \fBdirectory mask\fR) OR
+\fBforce directory mode\fR.
+.RE
+.SH "PROTOCOL NEGOTIATION"
+\fBksmbd\fR supports SMB protocol versions from SMB1 through SMB3.1.1.
+The protocol version is negotiated during the initial connection:
+.TS
+l l l.
+Version	Identifier	Key Features
+_
+SMB1	SMB1	Legacy; insecure; avoid
+SMB2.0	SMB2_20	Large MTU, compounding
+SMB2.1	SMB2_10	Leases, multi-credit
+SMB3.0	SMB3_00	Encryption, multichannel, SMB Direct
+SMB3.0.2	SMB3_02	Lease V2
+SMB3.1.1	SMB3_11	Pre-auth integrity, posix extensions
+.TE
+.PP
+The server negotiates the highest version both sides support, bounded by
+\fBserver min protocol\fR and \fBserver max protocol\fR.
+For best security and performance, set \fBserver min protocol = SMB2_10\fR
+(or higher) to disable SMB1.
+.SH "PERFORMANCE TUNING"
+.SS "I/O Size Parameters"
+.TS
+l l l.
+Parameter	Default	Effect
+_
+smb2 max read	4 MiB	Max read payload per request
+smb2 max write	4 MiB	Max write payload per request
+smb2 max trans	1 MiB	Max transactional buffer
+smbd max io size	8 MiB	Max RDMA read/write size
+.TE
+.PP
+Larger values improve throughput for sequential workloads but increase
+per-request kernel memory usage.
+For high-throughput file serving, increasing to 8\(en16\ MiB can help.
+For memory-constrained systems, keep defaults.
+.SS "Credit Control"
+\fBsmb2 max credits\fR (default: 8192) controls how many operations a single
+client can have in flight simultaneously.
+Higher values improve throughput for highly parallel workloads
+(e.g., multi-threaded copy, database access) but allow a single client to
+consume more server resources.
+.SS "Connection Limits"
+.TS
+l l l.
+Parameter	Default	Scope
+_
+max connections (global)	256	Total server-wide connections
+max connections (share)	128	Per-share connections
+max ip connections	32	Per-IP address connections
+max active sessions	1024	Total authenticated sessions
+max open files	10000	Open file handles per client
+.TE
+.PP
+\fBmax ip connections\fR provides basic protection against connection floods
+from a single source.
+A value of 0 for any connection limit sets it to the maximum (65536).
+.SS "Leases and Oplocks"
+\fBsmb2 leases = yes\fR enables directory leases, which allow clients to
+cache file and directory metadata locally.
+This dramatically reduces network round-trips for applications that
+repeatedly access the same files (e.g., build systems, IDEs).
+.PP
+\fBoplocks = yes\fR (per-share) enables opportunistic locks, which allow
+clients to cache file data and batch writes.
+Both should be enabled unless you need immediate cross-client visibility
+of file changes.
+.SS "Worker Threads"
+\fBmax worker threads\fR (default: 4, max: 64) controls the daemon's IPC
+processing capacity.
+Increase this if authentication latency is high (e.g., LDAP/AD-backed
+Kerberos) or if many clients connect simultaneously.
+For most deployments, the default of 4 is sufficient.
+.SS "Multichannel"
+\fBserver multi channel support = yes\fR enables SMB3 multichannel, which
+allows clients to aggregate bandwidth across multiple network interfaces.
+Requires SMB 3.0+, multiple NICs on both client and server, and proper
+network configuration.
+Provides automatic failover if one path goes down.
+.SS "Durable Handles"
+\fBdurable handles = yes\fR allows clients to reconnect to open files after
+brief network interruptions without losing state.
+The server preserves file handles during the grace period.
+Useful for Wi-Fi clients, VPN connections, and continuous availability
+scenarios.
+.SH "MACOS INTEGRATION"
+\fBksmbd\fR includes extensive macOS compatibility via the AAPL SMB2
+protocol extension (commonly called "Fruit", after Samba's
+\fBvfs_fruit\fR module).
+.SS "AAPL Negotiation"
+When \fBfruit extensions = yes\fR (default), the server responds to
+Apple's AAPL create context during \fBSMB2 CREATE\fR with negotiated
+capabilities.
+This enables:
+.IP \(bu 3
+Enriched directory listings (Finder metadata, permissions, resource forks
+in a single round-trip).
+.IP \(bu 3
+Server model icon in Finder sidebar (controlled by \fBfruit model\fR).
+.IP \(bu 3
+Zero file IDs to prevent CNID mismatch issues (\fBfruit zero file id\fR).
+.IP \(bu 3
+Server-side copy via COPY_CHUNK_WRITE (\fBfruit copyfile\fR).
+.IP \(bu 3
+Synthetic NFS ACEs for Unix permission mapping (\fBfruit nfs aces\fR).
+.PP
+These extensions have no effect on non-Apple clients.
+.SS "Time Machine"
+To set up a Time Machine backup share:
+.IP 1. 3
+Create the share directory and set permissions.
+.IP 2. 3
+Configure the share with \fBfruit time machine = yes\fR.
+.IP 3. 3
+Optionally set \fBfruit time machine max size\fR to limit disk usage.
+.IP 4. 3
+Ensure \fBfruit extensions = yes\fR in \fB[global]\fR.
+.IP 5. 3
+Optionally enable \fBdurable handles = yes\fR for backup reliability.
+.IP 6. 3
+Configure mDNS advertising (see \fBmDNS INTEGRATION\fR below).
+.PP
+Each Time Machine share is advertised with a unique per-share UUID
+in the \fB_adisk._tcp\fR mDNS TXT record (\fBadVU=\fR field),
+derived deterministically from the server UUID and share name.
+This allows macOS to reliably identify backup volumes across reboots.
+.SS "Recommended VFS Modules"
+For macOS shares, add the following VFS modules:
+.PP
+.nf
+vfs objects = acl_xattr streams_xattr
+.fi
+.PP
+\fBacl_xattr\fR stores Windows-style ACLs as extended attributes.
+\fBstreams_xattr\fR stores NTFS alternate data streams (including
+macOS resource forks and Finder info) as xattrs.
+.SH "MDNS INTEGRATION"
+The optional \fBksmbd-mdns-configure\fR script generates mDNS service
+files from \fBksmbd.conf\fR so that the SMB server is automatically
+discoverable on the local network.
+.PP
+Supported mDNS backends:
+.TS
+l l.
+Backend	Configuration Files
+_
+\fBavahi\fR	/etc/avahi/services/ksmbd-*.service
+\fBresolved\fR	/etc/systemd/dnssd/ksmbd-*.dnssd
+\fBmdnsd\fR	/etc/mdns.d/ksmbd-*.service
+\fBmdnsresponder\fR	/usr/local/lib/ksmbd/ksmbd-mdns-register
+.TE
+.PP
+Services advertised:
+.IP \(bu 3
+\fB_smb._tcp\fR on the configured port (always).
+.IP \(bu 3
+\fB_adisk._tcp\fR on port 9 with per-volume TXT records (when Time Machine
+shares are configured).
+.PP
+Configuration is idempotent: the script caches a hash of the current
+configuration and skips regeneration if nothing has changed.
+.PP
+\fBksmbd.conf\fR(5) provides two optional parameters to control mDNS:
+.TP
+\fBmdns bonjour\fR (yes | no | auto)
+Master switch for mDNS advertising.
+\fByes\fR enables and fails if no backend is found.
+\fBno\fR disables entirely.
+\fBauto\fR (default) enables if a backend is available.
+.TP
+\fBmdns backend\fR (auto | avahi | resolved | mdnsd | mdnsresponder)
+Force a specific mDNS backend.
+\fBauto\fR (default) detects the best available.
+.SH "DEBUGGING AND TROUBLESHOOTING"
+.SS "Kernel Debug Output"
+Enable kernel debug components to diagnose protocol issues:
+.PP
+.nf
+# Enable SMB protocol tracing:
+ksmbdctl debug set smb
+
+# Enable authentication tracing:
+ksmbdctl debug set auth
+
+# Enable everything:
+ksmbdctl debug set all
+
+# View output:
+dmesg \-wH
+# or: journalctl \-kf
+
+# Disable all:
+ksmbdctl debug off
+.fi
+.PP
+Debug output is verbose.
+Enable only the components you need, and disable them when done.
+.SS "Daemon Logging"
+The daemon logs to syslog by default (facility: daemon).
+For interactive debugging, start in foreground mode:
+.PP
+.nf
+ksmbdctl start \-\-nodetach \-\-verbose
+.fi
+.PP
+For structured log ingestion:
+.PP
+.nf
+ksmbdctl start \-\-nodetach \-\-json\-log
+.fi
+.SS "Configuration Validation"
+Validate configuration without starting the daemon:
+.PP
+.nf
+ksmbdctl config validate
+.fi
+.PP
+This catches syntax errors, invalid parameter values, and
+cross-reference issues before a restart.
+.SS "Common Problems"
+.TP
+\fBModule not loaded\fR
+Run \fBmodprobe ksmbd\fR to load the kernel module.
+Check \fBdmesg\fR for load errors.
+Verify with \fBksmbdctl status\fR.
+.TP
+\fBDaemon not starting (port in use)\fR
+Port 445 may be in use by Samba (\fBsmbd\fR).
+Stop Samba first: \fBsystemctl stop smbd\fR.
+Or use a different port: \fBksmbdctl start \-p 4455\fR.
+.TP
+\fBAuthentication failures\fR
+Verify the user exists: \fBksmbdctl user list\fR.
+Check password: delete and re-add the user.
+Enable auth debug: \fBksmbdctl debug set auth\fR.
+.TP
+\fBPermission denied on share\fR
+Check \fBvalid users\fR, \fBinvalid users\fR, \fBhosts allow\fR,
+\fBhosts deny\fR, and \fBread only\fR settings.
+Verify filesystem permissions on the share path.
+Check \fBforce user\fR / \fBforce group\fR mapping.
+.TP
+\fBmacOS cannot find server\fR
+Verify mDNS is configured: run \fBksmbd-mdns-configure\fR.
+Check Avahi/systemd-resolved is running.
+Test with: \fBdns-sd \-B _smb._tcp\fR or \fBavahi-browse \-rt _smb._tcp\fR.
+.TP
+\fBTime Machine does not see backup share\fR
+Verify \fBfruit time machine = yes\fR on the share and
+\fBfruit extensions = yes\fR in \fB[global]\fR.
+Check \fB_adisk._tcp\fR advertisement:
+\fBavahi-browse \-rt _adisk._tcp\fR.
+Verify TXT records contain \fBadVN=\fR and \fBadVU=\fR fields.
+.TP
+\fBSlow performance\fR
+Enable leases: \fBsmb2 leases = yes\fR.
+Enable oplocks on the share: \fBoplocks = yes\fR.
+Increase I/O sizes: \fBsmb2 max read = 8M\fR, \fBsmb2 max write = 8M\fR.
+For RDMA: increase \fBsmbd max io size\fR.
+Check \fBmax worker threads\fR if authentication is a bottleneck.
+.TP
+\fBChanges not taking effect\fR
+Share and user changes: \fBksmbdctl reload\fR is sufficient.
+Global protocol/security changes: full restart required
+(\fBksmbdctl stop && ksmbdctl start\fR).
+.SH "ADMINISTRATION BEST PRACTICES"
+.SS "Initial Setup"
+.IP 1. 3
+Load the kernel module: \fBmodprobe ksmbd\fR.
+.IP 2. 3
+Create users: \fBksmbdctl user add \fIusername\fR.
+.IP 3. 3
+Edit \fBksmbd.conf\fR or use \fBksmbdctl share add\fR.
+.IP 4. 3
+Set directory permissions on share paths.
+.IP 5. 3
+Start the daemon: \fBksmbdctl start\fR (or \fBsystemctl start ksmbd\fR).
+.IP 6. 3
+Verify: \fBksmbdctl status\fR and \fBksmbdctl features\fR.
+.SS "Security Hardening"
+.IP \(bu 3
+Disable SMB1: Set \fBserver min protocol = SMB2_10\fR (or higher).
+.IP \(bu 3
+Require signing: Set \fBserver signing = mandatory\fR.
+.IP \(bu 3
+Require encryption: Set \fBsmb3 encryption = mandatory\fR (SMB3 clients only).
+.IP \(bu 3
+Restrict guest access: Set \fBmap to guest = never\fR and \fBguest ok = no\fR.
+.IP \(bu 3
+Use \fBhosts allow\fR and \fBhosts deny\fR with CIDR notation.
+.IP \(bu 3
+Protect the password database: \fBchmod 0600 ksmbdpwd.db\fR.
+.IP \(bu 3
+Use Kerberos instead of NTLM where possible.
+.IP \(bu 3
+Bind to specific interfaces: \fBbind interfaces only = yes\fR.
+.IP \(bu 3
+Set \fBrestrict anonymous = 1\fR or \fB2\fR to prevent anonymous enumeration.
+.SS "Monitoring"
+.IP \(bu 3
+Check status: \fBksmbdctl status\fR.
+.IP \(bu 3
+Review features: \fBksmbdctl features\fR.
+.IP \(bu 3
+Watch kernel logs: \fBjournalctl \-kf \-u ksmbd\fR.
+.IP \(bu 3
+Check daemon logs: \fBjournalctl \-u ksmbd \-f\fR.
+.IP \(bu 3
+List active shares: \fBksmbdctl share list \-\-live\fR.
+.SS "Backup and Restore"
+The entire ksmbd configuration consists of two files:
+.IP \(bu 3
+\fB/usr/local/etc/ksmbd/ksmbd.conf\fR \(em share configuration.
+.IP \(bu 3
+\fB/usr/local/etc/ksmbd/ksmbdpwd.db\fR \(em user database (contains password hashes).
+.PP
+Back up both files regularly.
+Restore by copying them back and running \fBksmbdctl reload\fR
+(or restarting for global changes).
+.SH FILES
+.TP
+\fB/usr/local/etc/ksmbd/ksmbd.conf\fR
+Server configuration file (INI format). See \fBksmbd.conf\fR(5).
+Contains the \fB[global]\fR section and per-share sections.
+.TP
+\fB/usr/local/etc/ksmbd/ksmbdpwd.db\fR
+User password database. See \fBksmbdpwd.db\fR(5).
+Plain text, one \fIuser\fR:\fIhash\fR per line.
+Should be mode 0600, owned by root.
+.TP
+\fB/usr/local/etc/ksmbd/ksmbd.subauth\fR
+Optional sub-authentication configuration.
+.TP
+\fB/usr/local/var/run/ksmbd.lock\fR
+PID lock file for the daemon process.
+Contains the daemon PID; used by \fBstop\fR and \fBreload\fR commands.
+.TP
+\fB/usr/local/var/run/ksmbd.fifo\fR
+Named pipe used for share listing communication between the control
+tool and the daemon.
+Created dynamically when \fBshare list \-\-live\fR is invoked.
+.TP
+\fB/sys/class/ksmbd\-control/kill_server\fR
+Sysfs attribute to shut down the ksmbd kernel server.
+Writing \fB"hard"\fR terminates all connections immediately.
+.TP
+\fB/sys/class/ksmbd\-control/debug\fR
+Sysfs attribute to toggle kernel debug components.
+Reading it shows currently enabled components.
+Writing a component name toggles it.
+.TP
+\fB/sys/module/ksmbd/version\fR
+Sysfs attribute showing the ksmbd kernel module version string.
+.SH "EXIT STATUS"
+.TP
+\fB0\fR
+Operation completed successfully.
+.TP
+\fB1\fR
+An error occurred (invalid arguments, missing files, permission
+denied, daemon not running, module not loaded, etc.).
+Error details are printed to stderr.
+.SH EXAMPLES
+.SS "Initial Server Setup"
+.nf
+# Load the kernel module
+sudo modprobe ksmbd
+
+# Create a user
+ksmbdctl user add alice
+
+# Create a share
+ksmbdctl share add documents \\
+    \-o "path = /srv/smb/documents" \\
+    \-o "comment = Shared Documents" \\
+    \-o "read only = no"
+
+# Start the server
+sudo ksmbdctl start
+
+# Verify
+ksmbdctl status
+ksmbdctl features
+.fi
+.SS "Time Machine Setup"
+.nf
+# Add the share
+ksmbdctl share add timemachine \\
+    \-o "path = /srv/smb/timemachine" \\
+    \-o "read only = no" \\
+    \-o "fruit time machine = yes" \\
+    \-o "fruit time machine max size = 500G" \\
+    \-o "vfs objects = acl_xattr streams_xattr"
+
+# Configure mDNS
+sudo ksmbd\-mdns\-configure
+
+# Reload
+ksmbdctl reload
+.fi
+.SS "Debugging a Connection Issue"
+.nf
+# Check server is running
+ksmbdctl status
+
+# Enable protocol and auth tracing
+ksmbdctl debug set smb
+ksmbdctl debug set auth
+
+# Watch kernel output
+dmesg \-wH
+
+# After debugging, disable
+ksmbdctl debug off
+.fi
+.SS "Security Hardened Configuration"
+.nf
+# In ksmbd.conf [global]:
+#   server min protocol = SMB3_00
+#   server signing = mandatory
+#   smb3 encryption = mandatory
+#   map to guest = never
+#   restrict anonymous = 2
+#   bind interfaces only = yes
+#   interfaces = eth0
+
+# Restart to apply global changes
+sudo ksmbdctl stop
+sudo ksmbdctl start
+.fi
+.SS "Managing Shares"
+.nf
+# Add a public read-only share
+ksmbdctl share add public \\
+    \-o "path = /srv/smb/public" \\
+    \-o "read only = yes" \\
+    \-o "guest ok = yes"
+
+# Update a share parameter
+ksmbdctl share update public \-o "comment = Public Files"
+
+# Show share configuration
+ksmbdctl share show public
+
+# List all shares
+ksmbdctl share list
+
+# Delete a share
+ksmbdctl share delete public
+.fi
+.SS "User Management"
+.nf
+# Add user with inline password (scripts)
+ksmbdctl user add bob \-p "s3cret"
+
+# Update password interactively
+ksmbdctl user update bob
+
+# List all users
+ksmbdctl user list
+
+# Delete a user
+ksmbdctl user delete bob
+.fi
+.SH "REMOVED LEGACY COMMANDS"
+The legacy command names \fBksmbd.addshare\fR, \fBksmbd.adduser\fR,
+\fBksmbd.control\fR, and \fBksmbd.mountd\fR are no longer installed.
+Invoke \fBksmbdctl\fR directly.
+.PP
+Migration mapping:
+.TS
+l l.
+Legacy Command	Equivalent
+_
+ksmbd.mountd	ksmbdctl start
+ksmbd.control \-\-shutdown	ksmbdctl stop
+ksmbd.control \-\-reload	ksmbdctl reload
+ksmbd.control \-\-debug=COMP	ksmbdctl debug set COMP
+ksmbd.control \-\-ksmbd\-version	ksmbdctl version
+ksmbd.control \-\-list	ksmbdctl share list \-\-live
+ksmbd.control \-\-status	ksmbdctl status
+ksmbd.control \-\-features	ksmbdctl features
+ksmbd.adduser USER	ksmbdctl user set USER
+ksmbd.adduser \-a USER	ksmbdctl user add USER
+ksmbd.adduser \-d USER	ksmbdctl user delete USER
+ksmbd.adduser \-u USER	ksmbdctl user update USER
+ksmbd.addshare SHARE	ksmbdctl share set SHARE
+ksmbd.addshare \-a SHARE	ksmbdctl share add SHARE
+ksmbd.addshare \-d SHARE	ksmbdctl share delete SHARE
+ksmbd.addshare \-u SHARE	ksmbdctl share update SHARE
+.TE
+.SH SIGNALS
+When running in daemon mode (\fBksmbdctl start\fR), the daemon responds to:
+.TP
+\fBSIGHUP\fR
+Reload configuration files (\fBksmbd.conf\fR and \fBksmbdpwd.db\fR).
+Sets the \fBKSMBD_SHOULD_RELOAD_CONFIG\fR flag internally.
+.TP
+\fBSIGUSR1\fR
+Write share listing to the named pipe (\fBksmbd.fifo\fR).
+Used internally by \fBksmbdctl share list \-\-live\fR.
+Sets the \fBKSMBD_SHOULD_LIST_CONFIG\fR flag.
+.TP
+\fBSIGTERM\fR, \fBSIGINT\fR, \fBSIGQUIT\fR
+Shut down gracefully.
+The daemon sends a \fBSHUTTING_DOWN\fR event to the kernel
+module and exits.
+Clears the \fBKSMBD_HEALTH_RUNNING\fR flag.
+.SH "CONFIGURATION QUICK REFERENCE"
+.SS "Global Parameters"
+.TS
+l l l.
+Parameter	Default	Type
+_
+netbios name	KSMBD SERVER	string (max 15)
+server string	SMB SERVER	string
+workgroup	WORKGROUP	string
+tcp port	445	integer 1\(en65535
+bind interfaces only	no	boolean
+interfaces	(empty)	list
+server min protocol	SMB2_10	version string
+server max protocol	SMB3_11	version string
+server signing	auto	disabled|auto|mandatory
+smb3 encryption	auto	disabled|auto|mandatory
+kerberos support	no	boolean
+kerberos keytab file	(system default)	path
+kerberos service name	cifs/FQDN	string
+guest account	nobody	string
+map to guest	never	never|bad user
+restrict anonymous	0	0|1|2
+max connections	256	integer
+max ip connections	32	integer
+max active sessions	1024	integer
+max open files	10000	integer
+deadtime	0	minutes
+ipc timeout	0	seconds
+smb2 max read	4M	size
+smb2 max write	4M	size
+smb2 max trans	1M	size
+smb2 max credits	8192	integer
+smbd max io size	8M	size
+smb2 leases	no	boolean
+durable handles	no	boolean
+server multi channel support	no	boolean
+max worker threads	4	integer 1\(en64
+fruit extensions	yes	boolean
+fruit model	Xserve	string
+fruit zero file id	yes	boolean
+fruit nfs aces	no	boolean
+fruit copyfile	no	boolean
+root directory	(empty)	path
+share:fake_fscaps	64	integer
+.TE
+.SS "Share Parameters"
+.TS
+l l l.
+Parameter	Default	Type
+_
+path	(required)	path
+comment	(empty)	string
+browseable	yes	boolean
+read only	yes	boolean
+guest ok	no	boolean
+guest account	(global)	string
+valid users	(empty)	user list
+invalid users	(empty)	user list
+read list	(empty)	user list
+write list	(empty)	user list
+hosts allow	(empty)	IP/CIDR list
+hosts deny	(empty)	IP/CIDR list
+max connections	128	integer
+create mask	0744	octal
+directory mask	0755	octal
+force create mode	0000	octal
+force directory mode	0000	octal
+force user	(empty)	string
+force group	(empty)	string
+inherit owner	no	boolean
+store dos attributes	yes	boolean
+hide dot files	yes	boolean
+follow symlinks	no	boolean
+crossmnt	yes	boolean
+oplocks	yes	boolean
+veto files	(empty)	pattern list
+vfs objects	(empty)	module list
+continuous availability	no	boolean
+fruit time machine	no	boolean
+fruit tm max size	0	size
+fruit finder info	yes	bool
+fruit resource fork size	no	bool
+fruit max access	yes	bool
+.TE
+.SH COPYRIGHT
+Copyright \(co 2015-2026 ksmbd-tools contributors.
+License GPLv2: GNU GPL version 2 <https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>.
+.br
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+.SH "REPORTING BUGS"
+For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-tools/issues.
+.SH "SEE ALSO"
+.TP
+\fBConfiguration File\fR
+\fBksmbd.conf\fR(5)
+.TP
+\fBUser Database\fR
+\fBksmbdpwd.db\fR(5)
+.TP
+\fBKernel Module\fR
+\fBmodprobe\fR(8), \fBdmesg\fR(1)
+.TP
+\fBmDNS\fR
+\fBavahi-daemon\fR(8), \fBsystemd-resolved\fR(8)
+.TP
+\fBRelated Servers\fR
+\fBsmbd\fR(8) (Samba)
