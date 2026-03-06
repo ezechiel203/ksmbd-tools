@@ -5,7 +5,9 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
+#include <errno.h>
 #include <glib.h>
+#include <limits.h>
 #include <string.h>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
@@ -31,31 +33,59 @@ static process_entry_fn process_smbconf_entry,
 unsigned long long cp_memparse(char *v)
 {
 	char *cp;
+
+	errno = 0;
 	unsigned long long ull = strtoull(v, &cp, 0);
+	if (errno || cp == v)
+		return 0;
 
 	switch (*cp) {
 	case 'E':
 	case 'e':
+		if (ull > (ULLONG_MAX >> 10)) {
+			pr_err("Value overflow in memparse\n");
+			return ULLONG_MAX;
+		}
 		ull <<= 10;
 		/* Fall through */
 	case 'P':
 	case 'p':
+		if (ull > (ULLONG_MAX >> 10)) {
+			pr_err("Value overflow in memparse\n");
+			return ULLONG_MAX;
+		}
 		ull <<= 10;
 		/* Fall through */
 	case 'T':
 	case 't':
+		if (ull > (ULLONG_MAX >> 10)) {
+			pr_err("Value overflow in memparse\n");
+			return ULLONG_MAX;
+		}
 		ull <<= 10;
 		/* Fall through */
 	case 'G':
 	case 'g':
+		if (ull > (ULLONG_MAX >> 10)) {
+			pr_err("Value overflow in memparse\n");
+			return ULLONG_MAX;
+		}
 		ull <<= 10;
 		/* Fall through */
 	case 'M':
 	case 'm':
+		if (ull > (ULLONG_MAX >> 10)) {
+			pr_err("Value overflow in memparse\n");
+			return ULLONG_MAX;
+		}
 		ull <<= 10;
 		/* Fall through */
 	case 'K':
 	case 'k':
+		if (ull > (ULLONG_MAX >> 10)) {
+			pr_err("Value overflow in memparse\n");
+			return ULLONG_MAX;
+		}
 		ull <<= 10;
 	}
 
@@ -283,7 +313,7 @@ char *cp_rtrim(const char *v, const char *p)
 
 int cp_key_cmp(const char *lk, const char *rk)
 {
-	return g_ascii_strncasecmp(lk, rk, strlen(rk));
+	return g_ascii_strcasecmp(lk, rk);
 }
 
 char *cp_get_group_kv_string(char *v)
@@ -312,7 +342,14 @@ int cp_get_group_kv_config_opt(char *v)
 
 unsigned long cp_get_group_kv_long_base(char *v, int base)
 {
-	return strtoul(v, NULL, base);
+	unsigned long val;
+	char *endptr;
+
+	errno = 0;
+	val = strtoul(v, &endptr, base);
+	if (errno || endptr == v)
+		return 0;
+	return val;
 }
 
 unsigned long cp_get_group_kv_long(char *v)
@@ -404,12 +441,22 @@ static int process_global_conf_kv(GHashTable *kv)
 
 	if (group_kv_steal(kv, "tcp port", &k, &v)) {
 		/* mountd option has precedence */
-		if (!global_conf.tcp_port)
+		if (!global_conf.tcp_port) {
 			global_conf.tcp_port = cp_get_group_kv_long(v);
+			if (global_conf.tcp_port > 65535) {
+				pr_err("Invalid TCP port: %lu\n",
+				       cp_get_group_kv_long(v));
+				global_conf.tcp_port = 445;
+			}
+		}
 	}
 
 	if (group_kv_steal(kv, "ipc timeout", &k, &v)) {
 		global_conf.ipc_timeout = cp_get_group_kv_long(v);
+		if (global_conf.ipc_timeout > 65535) {
+			pr_err("Invalid IPC timeout value\n");
+			global_conf.ipc_timeout = 0;
+		}
 	}
 
 	if (group_kv_steal(kv, "max open files", &k, &v)) {
@@ -608,6 +655,43 @@ static int process_global_conf_kv(GHashTable *kv)
 			global_conf.max_worker_threads = 64;
 	}
 
+	/* Optional server limits — 0 means "not configured, use kernel default" */
+	if (group_kv_steal(kv, "tcp recv timeout", &k, &v))
+		global_conf.tcp_recv_timeout = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "tcp send timeout", &k, &v))
+		global_conf.tcp_send_timeout = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "quic recv timeout", &k, &v))
+		global_conf.quic_recv_timeout = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "quic send timeout", &k, &v))
+		global_conf.quic_send_timeout = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "max lock count", &k, &v))
+		global_conf.max_lock_count = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "max buffer size", &k, &v))
+		global_conf.max_buffer_size = cp_memparse(v);
+
+	if (group_kv_steal(kv, "session timeout", &k, &v))
+		global_conf.session_timeout = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "durable handle timeout", &k, &v))
+		global_conf.durable_handle_timeout = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "max inflight requests", &k, &v))
+		global_conf.max_inflight_req = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "max async credits", &k, &v))
+		global_conf.max_async_credits = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "max sessions", &k, &v))
+		global_conf.max_sessions = cp_get_group_kv_long(v);
+
+	if (group_kv_steal(kv, "smb1 max mpx", &k, &v))
+		global_conf.smb1_max_mpx = cp_get_group_kv_long(v);
+
 	return 0;
 }
 
@@ -663,6 +747,7 @@ static void steal_global_share_conf_kv(GHashTable *kv)
 static void add_group_ipc_share_conf(void)
 {
 	add_group_key_value("comment = IPC share");
+	add_group_key_value("guest ok = yes");
 }
 
 static void ignore_group_kv(struct smbconf_group *group)
@@ -965,6 +1050,33 @@ int cp_parse_subauth(void)
 	return ret;
 }
 
+static int verify_mountd_pid(pid_t pid)
+{
+	char path[64], comm[32];
+	FILE *fp;
+	int ret = 0;
+
+	snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
+	fp = fopen(path, "r");
+	if (!fp)
+		return 0;
+		if (fgets(comm, sizeof(comm), fp)) {
+			size_t len = strlen(comm);
+
+			if (len > 0 && comm[len - 1] == '\n')
+				comm[len - 1] = '\0';
+			/*
+			 * Unified CLI mode runs mountd via `ksmbdctl start`,
+			 * so the process comm can be "ksmbdctl".
+			 */
+			if (!strcmp(comm, "ksmbd.mountd") ||
+			    !strcmp(comm, "ksmbdctl"))
+				ret = 1;
+		}
+	fclose(fp);
+	return ret;
+}
+
 static int is_a_lock(char *entry)
 {
 	char *delim = strchr(entry, 0x00);
@@ -994,8 +1106,13 @@ static int is_a_lock(char *entry)
 		goto out;
 	}
 	is_lock = !kill(pid, 0);
-	if (!is_lock)
+	if (!is_lock) {
 		pr_debug("Lock has orphaned PID\n");
+		goto out;
+	}
+	is_lock = verify_mountd_pid(pid);
+	if (!is_lock)
+		pr_debug("Lock PID is not ksmbdctl start daemon\n");
 out:
 	return is_lock;
 }
@@ -1069,11 +1186,14 @@ void cp_parse_external_smbconf_group(char *name, char **options)
 
 		if (is_a_key_value(option)) {
 			enum KSMBD_SHARE_CONF c;
+			char *eq = strchr(option, '=');
+			g_autofree char *opt_key =
+				g_strstrip(g_strndup(option, eq - option));
 
 			for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++)
 				if ((!is_global ||
 				     !KSMBD_SHARE_CONF_IS_GLOBAL(c)) &&
-				    shm_share_config(option, c))
+				    shm_share_config(opt_key, c))
 					break;
 
 			if (c < KSMBD_SHARE_CONF_MAX) {

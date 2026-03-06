@@ -75,7 +75,7 @@ to `configure` or `meson`, respectively. This is due to it being likely that
 your system does not mount a tmpfs filesystem at the directory given by the  
 default value. Common choices are `/run`, `/var/run`, or `/tmp`. ksmbd-tools  
 uses the directory for per-process modifiable data, namely the `ksmbd.lock`  
-file holding the PID of the `ksmbd.mountd` manager process. If your autoconf  
+file holding the PID of the `ksmbdctl start` manager process. If your autoconf  
 supports it, you may instead choose to give `--runstatedir` to `configure`.
 
 If you have systemd and it meets at least the minimum version required, the  
@@ -185,7 +185,7 @@ sudo ksmbdctl user update --password MyNewPassword MyUser
 # Delete a user from the default user database.
 sudo ksmbdctl user delete MyUser
 
-# The utilities notify ksmbd.mountd of changes by sending it the SIGHUP signal.
+# The utilities notify `ksmbdctl start` of changes by sending it the SIGHUP signal.
 # This can be done manually when changes are made without using the utilities.
 sudo ksmbdctl reload
 

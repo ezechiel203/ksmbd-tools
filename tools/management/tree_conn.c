@@ -211,11 +211,15 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 bind:
 	conn->id = req->connect_id;
 	conn->share = share;
-	resp->status = KSMBD_TREE_CONN_STATUS_OK;
 	resp->connection_flags = conn->flags;
 
-	if (sm_handle_tree_connect(req->session_id, user, conn))
+	if (sm_handle_tree_connect(req->session_id, user, conn)) {
+		resp->status = KSMBD_TREE_CONN_STATUS_ERROR;
 		pr_err("treecon: Unable to bind tree connection\n");
+		goto out_error;
+	}
+
+	resp->status = KSMBD_TREE_CONN_STATUS_OK;
 
 	g_rw_lock_writer_lock(&share->update_lock);
 	clear_share_flag(share, KSMBD_SHARE_FLAG_UPDATE);

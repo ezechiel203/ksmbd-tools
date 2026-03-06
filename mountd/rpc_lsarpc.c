@@ -13,11 +13,16 @@
 #include <limits.h>
 #include <linux/ksmbd_server.h>
 
+#include <unistd.h>
 #include <management/user.h>
 #include <rpc.h>
 #include <rpc_lsarpc.h>
 #include <smbacl.h>
 #include <tools.h>
+
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 64
+#endif
 
 #define LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO	0
 #define LSARPC_OPNUM_OPEN_POLICY2			44
@@ -30,6 +35,22 @@
 #define DS_ROLE_BASIC_INFORMATION	1
 
 #define LSA_POLICY_INFO_ACCOUNT_DOMAIN	5
+
+static guint handle_hash(gconstpointer key)
+{
+	const unsigned char *p = key;
+	guint h = 0;
+	int i;
+
+	for (i = 0; i < HANDLE_SIZE; i++)
+		h = (h << 5) + h + p[i];
+	return h;
+}
+
+static gboolean handle_equal(gconstpointer a, gconstpointer b)
+{
+	return memcmp(a, b, HANDLE_SIZE) == 0;
+}
 
 static GHashTable	*ph_table;
 static GRWLock		ph_table_lock;
@@ -257,6 +278,8 @@ static int __lsarpc_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 	struct lsarpc_names_info *ni;
 
 	ni = g_ptr_array_remove_index(pipe->entries, i);
+	if (ni->user)
+		put_ksmbd_user(ni->user);
 	g_free(ni);
 	return 0;
 }
@@ -272,6 +295,10 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 
 	if (ndr_read_int32(dce, &num_sid))
 		goto fail;
+	if (num_sid > 256) {
+		pr_err("Too many SIDs: %u\n", num_sid);
+		goto fail;
+	}
 	// ref pointer
 	if (ndr_read_int32(dce, NULL))
 		goto fail;
@@ -284,7 +311,8 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 			goto fail;
 
 	for (i = 0; i < num_sid; i++) {
-		struct passwd *passwd;
+		struct passwd pwd_buf, *passwd;
+		char pwd_str_buf[1024];
 		int rid;
 
 		ni = g_try_malloc0(sizeof(struct lsarpc_names_info));
@@ -297,9 +325,15 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 		// sid
 		if (smb_read_sid(dce, &ni->sid))
 			goto fail;
+		if (!ni->sid.num_subauth) {
+			g_free(ni);
+			break;
+		}
 		ni->sid.num_subauth--;
 		rid = ni->sid.sub_auth[ni->sid.num_subauth];
-		passwd = getpwuid(rid);
+		if (getpwuid_r(rid, &pwd_buf, pwd_str_buf,
+			       sizeof(pwd_str_buf), &passwd))
+			passwd = NULL;
 		if (passwd)
 			ni->user = usm_lookup_user(passwd->pw_name);
 
@@ -469,8 +503,10 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 		if (ndr_read_uniq_vstring_ptr(dce, &username))
 			goto fail;
 		if (STR_VAL(username) && strstr(STR_VAL(username), "\\")) {
-			strtok(STR_VAL(username), "\\");
-			name = strtok(NULL, "\\");
+			char *saveptr;
+
+			strtok_r(STR_VAL(username), "\\", &saveptr);
+			name = strtok_r(NULL, "\\", &saveptr);
 		}
 
 		ni->user = usm_lookup_user(name);
@@ -536,7 +572,7 @@ static int lsarpc_lookup_names3_return(struct ksmbd_rpc_pipe *pipe)
 		return KSMBD_RPC_EBAD_DATA;
 
 	for (i = 0; i < pipe->num_entries; i++) {
-		if (ndr_write_int16(dce, SID_TYPE_USER)) // sid type
+		if (ndr_write_int16(dce, SMB_SID_TYPE_USER)) // sid type
 			return KSMBD_RPC_EBAD_DATA;
 
 		if (ndr_write_int16(dce, 0))
@@ -557,6 +593,8 @@ static int lsarpc_lookup_names3_return(struct ksmbd_rpc_pipe *pipe)
 		struct lsarpc_names_info *ni;
 
 		ni = g_ptr_array_index(pipe->entries, i);
+		if (ni->sid.num_subauth >= SID_MAX_SUB_AUTHORITIES)
+			continue;
 		ni->sid.sub_auth[ni->sid.num_subauth++] = ni->user->uid;
 
 		if (ndr_write_int32(dce, ni->sid.num_subauth)) // sid auth count
@@ -618,9 +656,13 @@ static int lsarpc_invoke(struct ksmbd_rpc_pipe *pipe)
 	case LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO:
 		/*
 		 * DS_ROLE_GET_PRIMARY_DOMAIN_INFO and CLOSE both map to opnum 0.
-		 * Distinguish the request by fragment length.
+		 * Distinguish by context_id: if the request was bound to the
+		 * dssetup interface, it is DS_ROLE_GET_PRIMARY_DOMAIN_INFO;
+		 * otherwise it is LSARPC_CLOSE.
 		 */
-		if (pipe->dce->hdr.frag_length == 26)
+		if (pipe->dce->dssetup_context_id >= 0 &&
+		    pipe->dce->req_hdr.context_id ==
+		    (__u16)pipe->dce->dssetup_context_id)
 			ret = lsarpc_get_primary_domain_info_invoke(pipe);
 		else
 			ret = lsarpc_close_invoke(pipe);
@@ -658,7 +700,9 @@ static int lsarpc_return(struct ksmbd_rpc_pipe *pipe,
 
 	switch (dce->req_hdr.opnum) {
 	case LSARPC_OPNUM_DS_ROLE_GET_PRIMARY_DOMAIN_INFO:
-		if (dce->hdr.frag_length == 26)
+		if (dce->dssetup_context_id >= 0 &&
+		    dce->req_hdr.context_id ==
+		    (__u16)dce->dssetup_context_id)
 			status = lsarpc_get_primary_domain_info_return(pipe);
 		else
 			status = lsarpc_close_return(pipe);
@@ -713,28 +757,33 @@ static void lsarpc_ph_clear_table(void)
 	GHashTableIter iter;
 
 	g_rw_lock_writer_lock(&ph_table_lock);
-	ghash_for_each(ph, ph_table, iter)
+	ghash_for_each(ph, ph_table, iter) {
+		if (ph->user)
+			put_ksmbd_user(ph->user);
 		g_free(ph);
+	}
+	g_hash_table_remove_all(ph_table);
 	g_rw_lock_writer_unlock(&ph_table_lock);
 }
 
 void rpc_lsarpc_init(void)
 {
 	if (!domain_name) {
-		char hostname[NAME_MAX];
+		char hostname[HOST_NAME_MAX + 1];
 
 		/*
 		 * ksmbd supports the standalone server and
 		 * uses the hostname as the domain name.
 		 */
-		if (gethostname(hostname, NAME_MAX))
+		if (gethostname(hostname, sizeof(hostname)))
 			abort();
+		hostname[HOST_NAME_MAX] = '\0';
 
 		domain_name = g_ascii_strup(hostname, -1);
 	}
 
 	if (!ph_table)
-		ph_table = g_hash_table_new(g_str_hash, g_str_equal);
+		ph_table = g_hash_table_new(handle_hash, handle_equal);
 }
 
 void rpc_lsarpc_destroy(void)

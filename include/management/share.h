@@ -123,6 +123,8 @@ enum KSMBD_SHARE_CONF {
 	KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE,
 	KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS		= 35,
 	KSMBD_SHARE_CONF_CONTINUOUS_AVAILABILITY,
+	KSMBD_SHARE_CONF_STREAMS,
+	KSMBD_SHARE_CONF_ACL_XATTR,
 	KSMBD_SHARE_CONF_MAX
 };
 
@@ -151,7 +153,7 @@ static inline void clear_share_flag(struct ksmbd_share *share, int flag)
 
 static inline int test_share_flag(struct ksmbd_share *share, int flag)
 {
-	return share->flags & flag;
+	return !!(share->flags & flag);
 }
 
 struct ksmbd_share *get_ksmbd_share(struct ksmbd_share *share);

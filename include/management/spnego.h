@@ -8,6 +8,8 @@
 #ifndef _MANAGEMENT_SPNEGO_H_
 #define _MANAGEMENT_SPNEGO_H_
 
+#include <errno.h>
+
 struct ksmbd_spnego_auth_out {
 	char		*spnego_blob;
 	unsigned int	blob_len;

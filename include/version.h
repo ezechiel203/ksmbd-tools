@@ -3,8 +3,9 @@
  *  Copyright (C) 2020 Namjae Jeon <linkinjeon@kernel.org>
  */
 
-#ifndef _VERSION_H
+#ifndef __KSMBD_VERSION_H__
+#define __KSMBD_VERSION_H__
 
 #define KSMBD_TOOLS_VERSION "3.5.6"
 
-#endif /* !_VERSION_H */
+#endif /* __KSMBD_VERSION_H__ */

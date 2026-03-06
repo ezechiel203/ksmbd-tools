@@ -11,6 +11,12 @@
 #include <linux/types.h>
 #include <glib.h>
 
+#ifndef __packed
+#define __packed __attribute__((packed))
+#endif
+
+#define HANDLE_SIZE	20
+
 #define KSMBD_DCERPC_LITTLE_ENDIAN	(1 << 0)
 #define KSMBD_DCERPC_ALIGN2		(1 << 1)
 #define KSMBD_DCERPC_ALIGN4		(1 << 2)
@@ -86,7 +92,7 @@ struct dcerpc_header {
 	__u32	call_id;             /* 12:04 call identifier */
 
 	/* end common fields */
-};
+} __packed;
 
 struct dcerpc_request_header {
 	__u32	alloc_hint;
@@ -96,13 +102,14 @@ struct dcerpc_request_header {
 	 * SWITCH dcerpc_object object;
 	 * PAYLOAD_BLOB;
 	 */
-};
+} __packed;
 
 struct dcerpc_response_header {
 	__u32	alloc_hint;
 	__u16	context_id;
 	__u8	cancel_count;
-};
+	__u8	reserved;
+} __packed;
 
 /*
  * http://pubs.opengroup.org/onlinepubs/9629399/chap14.htm
@@ -242,6 +249,14 @@ struct ksmbd_dcerpc {
 	size_t			payload_sz;
 	char			*payload;
 	int			num_pointers;
+
+	/*
+	 * Track the context_id bound to the dssetup interface so we
+	 * can distinguish DS_ROLE_GET_PRIMARY_DOMAIN_INFO (opnum 0 on
+	 * dssetup) from LSARPC_CLOSE (opnum 0 on lsarpc).
+	 * -1 means dssetup was not bound.
+	 */
+	int			dssetup_context_id;
 
 	union {
 		struct dcerpc_header			hdr;

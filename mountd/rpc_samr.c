@@ -12,11 +12,16 @@
 #include <limits.h>
 #include <linux/ksmbd_server.h>
 
+#include <unistd.h>
 #include <management/user.h>
 #include <rpc.h>
 #include <rpc_samr.h>
 #include <smbacl.h>
 #include <tools.h>
+
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 64
+#endif
 
 #define SAMR_OPNUM_CONNECT5		64
 #define SAMR_OPNUM_ENUM_DOMAIN		6
@@ -29,6 +34,22 @@
 #define SAMR_OPNUM_GET_GROUP_FOR_USER	39
 #define SAMR_OPNUM_GET_ALIAS_MEMBERSHIP	16
 #define SAMR_OPNUM_CLOSE		1
+
+static guint handle_hash(gconstpointer key)
+{
+	const unsigned char *p = key;
+	guint h = 0;
+	int i;
+
+	for (i = 0; i < HANDLE_SIZE; i++)
+		h = (h << 5) + h + p[i];
+	return h;
+}
+
+static gboolean handle_equal(gconstpointer a, gconstpointer b)
+{
+	return memcmp(a, b, HANDLE_SIZE) == 0;
+}
 
 static GHashTable	*ch_table;
 static GRWLock		ch_table_lock;
@@ -430,15 +451,16 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	struct connect_handle *ch;
 	char *home_dir;
 	g_autofree char *profile_path = NULL;
-	char hostname[NAME_MAX];
+	char hostname[HOST_NAME_MAX + 1];
 	int i, ret;
 
 	ch = samr_ch_lookup(dce->sm_req.handle);
 	if (!ch)
 		return KSMBD_RPC_EBAD_FID;
 
-	if (gethostname(hostname, NAME_MAX))
+	if (gethostname(hostname, sizeof(hostname)))
 		return KSMBD_RPC_ENOMEM;
+	hostname[HOST_NAME_MAX] = '\0';
 
 	home_dir = g_strdup_printf("\\\\%s\\%s", hostname, ch->user->name);
 	if (!home_dir)
@@ -1012,14 +1034,15 @@ static void rpc_samr_add_domain_entry(char *name)
 void rpc_samr_init(void)
 {
 	if (!domain_name) {
-		char hostname[NAME_MAX];
+		char hostname[HOST_NAME_MAX + 1];
 
 		/*
 		 * ksmbd supports the standalone server and
 		 * uses the hostname as the domain name.
 		 */
-		if (gethostname(hostname, NAME_MAX))
+		if (gethostname(hostname, sizeof(hostname)))
 			abort();
+		hostname[HOST_NAME_MAX] = '\0';
 
 		domain_name = g_ascii_strup(hostname, -1);
 	}
@@ -1031,7 +1054,7 @@ void rpc_samr_init(void)
 	}
 
 	if (!ch_table)
-		ch_table = g_hash_table_new(g_str_hash, g_str_equal);
+		ch_table = g_hash_table_new(handle_hash, handle_equal);
 }
 
 static void samr_ch_clear_table(void)
@@ -1040,8 +1063,12 @@ static void samr_ch_clear_table(void)
 	GHashTableIter iter;
 
 	g_rw_lock_writer_lock(&ch_table_lock);
-	ghash_for_each(ch, ch_table, iter)
+	ghash_for_each(ch, ch_table, iter) {
+		if (ch->user)
+			put_ksmbd_user(ch->user);
 		g_free(ch);
+	}
+	g_hash_table_remove_all(ch_table);
 	g_rw_lock_writer_unlock(&ch_table_lock);
 }
 

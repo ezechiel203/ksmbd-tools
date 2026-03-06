@@ -21,6 +21,7 @@ static GRWLock		sessions_table_lock;
 static void kill_ksmbd_session(struct ksmbd_session *sess)
 {
 	g_list_free_full(sess->tree_conns, (GDestroyNotify)tcm_tree_conn_free);
+	put_ksmbd_user(sess->user);
 	g_rw_lock_clear(&sess->update_lock);
 	g_free(sess);
 }
@@ -157,9 +158,11 @@ int sm_check_sessions_capacity(unsigned long long id)
 		return ret;
 	}
 
-	if (g_atomic_int_add(&global_conf.sessions_cap, -1) < 1) {
+	if (g_atomic_int_get(&global_conf.sessions_cap) < 1) {
 		ret = -EINVAL;
+	} else if (g_atomic_int_add(&global_conf.sessions_cap, -1) < 1) {
 		g_atomic_int_inc(&global_conf.sessions_cap);
+		ret = -EINVAL;
 	}
 	return ret;
 }
@@ -181,7 +184,6 @@ int sm_handle_tree_disconnect(unsigned long long sess_id,
 	if (!sess)
 		return 0;
 
-	g_atomic_int_inc(&global_conf.sessions_cap);
 	g_rw_lock_writer_lock(&sess->update_lock);
 	dummy.id = tree_conn_id;
 	tc_list = g_list_find_custom(sess->tree_conns,
@@ -193,6 +195,14 @@ int sm_handle_tree_disconnect(unsigned long long sess_id,
 		tree_conn = (struct ksmbd_tree_conn *)tc_list->data;
 		sess->tree_conns = g_list_remove(sess->tree_conns, tree_conn);
 		sess->ref_counter--;
+		/*
+		 * Only reclaim session capacity when the session has
+		 * no remaining tree connections (i.e., it will be
+		 * destroyed). Otherwise, sessions_cap grows without
+		 * bound on every tree disconnect.
+		 */
+		if (!sess->tree_conns)
+			g_atomic_int_inc(&global_conf.sessions_cap);
 		tcm_tree_conn_free(tree_conn);
 	}
 	g_rw_lock_writer_unlock(&sess->update_lock);

@@ -219,11 +219,39 @@ static int srvsvc_share_enum_all_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	int status = KSMBD_RPC_OK;
+	int nr = pipe->num_entries;
 
 	if (ndr_write_union_int32(dce, dce->si_req.level))
 		return KSMBD_RPC_EBAD_DATA;
 
-	status = ndr_write_array_of_structs(pipe);
+	/*
+	 * srvsvc_NetShareInfoCtr.level == 1 arm:
+	 *   [ref] srvsvc_NetShareCtr1 *ctr1
+	 * srvsvc_NetShareCtr1:
+	 *   uint32 count;
+	 *   [size_is(count)] srvsvc_NetShareInfo1 *array;
+	 */
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers))
+		return KSMBD_RPC_EBAD_DATA;
+
+	if (ndr_write_int32(dce, nr))
+		return KSMBD_RPC_EBAD_DATA;
+
+	if (nr == 0) {
+		if (ndr_write_int32(dce, 0))
+			return KSMBD_RPC_EBAD_DATA;
+	} else {
+		dce->num_pointers++;
+		if (ndr_write_int32(dce, dce->num_pointers))
+			return KSMBD_RPC_EBAD_DATA;
+
+		if (ndr_write_int32(dce, nr))
+			return KSMBD_RPC_EBAD_DATA;
+
+		status = __ndr_write_array_of_structs(pipe, nr);
+	}
+
 	if (status == KSMBD_RPC_EBAD_DATA)
 		return status;
 	/*
@@ -352,7 +380,8 @@ static int srvsvc_share_info_invoke(struct ksmbd_rpc_pipe *pipe)
 
 	pipe->entry_processed = __share_entry_processed;
 
-	if (rpc_restricted_context(dce->rpc_req))
+	if (rpc_restricted_context(dce->rpc_req) &&
+	    dce->req_hdr.opnum != SRVSVC_OPNUM_SHARE_ENUM_ALL)
 		return 0;
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_GET_SHARE_INFO)
@@ -409,7 +438,8 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL)
 		status = srvsvc_share_enum_all_return(pipe);
 
-	if (rpc_restricted_context(dce->rpc_req))
+	if (rpc_restricted_context(dce->rpc_req) &&
+	    dce->req_hdr.opnum != SRVSVC_OPNUM_SHARE_ENUM_ALL)
 		status = KSMBD_RPC_EACCESS_DENIED;
 
 	srvsvc_clear_headers(pipe, status);

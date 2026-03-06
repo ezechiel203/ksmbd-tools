@@ -38,7 +38,12 @@ static inline void set_user_flag(struct ksmbd_user *user, int bit)
 
 static inline int test_user_flag(struct ksmbd_user *user, int bit)
 {
-	return user->flags & bit;
+	return !!(user->flags & bit);
+}
+
+static inline void clear_user_flag(struct ksmbd_user *user, int bit)
+{
+	user->flags &= ~bit;
 }
 
 int usm_remove_user(struct ksmbd_user *user);

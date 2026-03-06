@@ -27,10 +27,10 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.addshare [-v] [-C CONF] [-P PWDDB] [-a | -u | -d] [-o OPT]... SHARE\n");
+		"Usage: ksmbdctl share add|update|delete [-v] [-C CONF] [-P PWDDB] [-o OPT]... SHARE\n");
 
 	if (status != EXIT_SUCCESS)
-		printf("Try `ksmbd.addshare --help' for more information.\n");
+		printf("Try `ksmbdctl share --help' for more information.\n");
 	else
 		printf(
 			"\n"
@@ -51,7 +51,7 @@ static void usage(int status)
 			"  -V, --version        output version information and exit\n"
 			"  -h, --help           display this help and exit\n"
 			"\n"
-			"See ksmbd.addshare(8) for more details.\n");
+			"See ksmbdctl(8) for more details.\n");
 }
 
 static const struct option opts[] = {
@@ -161,7 +161,7 @@ int addshare_main(int argc, char **argv)
 		goto out;
 	}
 
-	pr_info("Notified mountd\n");
+	pr_info("Notified ksmbdctl start daemon\n");
 out:
 	remove_config();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;

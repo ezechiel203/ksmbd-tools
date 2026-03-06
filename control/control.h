@@ -8,6 +8,8 @@
 #ifndef __KSMBD_CONTROL_H__
 #define __KSMBD_CONTROL_H__
 
+const char *signing_to_str(int signing);
+int read_sysfs_string(const char *path, char *buf, size_t bufsz);
 int control_shutdown(void);
 int control_reload(void);
 int control_list(void);
@@ -15,5 +17,6 @@ int control_debug(char *comp);
 int control_show_version(void);
 int control_status(void);
 int control_features(char *pwddb, char *smbconf);
+int control_limits(char *pwddb, char *smbconf);
 
 #endif /* __KSMBD_CONTROL_H__ */

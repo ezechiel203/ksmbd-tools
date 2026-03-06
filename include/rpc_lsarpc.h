@@ -10,7 +10,6 @@
 
 #include <smbacl.h>
 
-#define HANDLE_SIZE	20
 #define DOMAIN_STR_SIZE	257
 
 struct ksmbd_rpc_command;

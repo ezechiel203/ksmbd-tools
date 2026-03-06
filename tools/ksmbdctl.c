@@ -41,6 +41,7 @@ static void ksmbdctl_usage(void)
 		"  reload               Reload configuration\n"
 		"  status               Show server status\n"
 		"  features             Show configured feature flags\n"
+		"  limits               Show server limits (from config)\n"
 		"  version              Show version information\n"
 		"\n"
 		"  user add USER        Add a user\n"
@@ -115,7 +116,7 @@ static int notify_mountd(void)
 		return 0;
 	}
 
-	pr_info("Notified mountd\n");
+	pr_info("Notified ksmbdctl start daemon\n");
 	return 0;
 }
 
@@ -174,6 +175,18 @@ static int cmd_features(int argc, char **argv)
 }
 
 /*
+ * ksmbdctl limits
+ */
+static int cmd_limits(int argc, char **argv)
+{
+	(void)argc;
+	(void)argv;
+	tool_main = control_main;
+	return control_limits(get_pwddb(), get_smbconf()) ?
+		EXIT_FAILURE : EXIT_SUCCESS;
+}
+
+/*
  * ksmbdctl version
  */
 static int cmd_version(int argc, char **argv)
@@ -208,6 +221,8 @@ static int cmd_user_add(int argc, char **argv)
 		case 'p':
 			g_free(password);
 			password = g_strdup(optarg);
+			if (optarg)
+				explicit_bzero(optarg, strlen(optarg));
 			break;
 		default:
 			pr_err("Usage: ksmbdctl user add [-p PWD] USER\n");
@@ -262,6 +277,8 @@ static int cmd_user_set(int argc, char **argv)
 		case 'p':
 			g_free(password);
 			password = g_strdup(optarg);
+			if (optarg)
+				explicit_bzero(optarg, strlen(optarg));
 			break;
 		default:
 			pr_err("Usage: ksmbdctl user set [-p PWD] USER\n");
@@ -357,6 +374,8 @@ static int cmd_user_update(int argc, char **argv)
 		case 'p':
 			g_free(password);
 			password = g_strdup(optarg);
+			if (optarg)
+				explicit_bzero(optarg, strlen(optarg));
 			break;
 		default:
 			pr_err("Usage: ksmbdctl user update [-p PWD] USER\n");
@@ -925,6 +944,7 @@ static const struct ksmbdctl_cmd commands[] = {
 	{ "reload",	cmd_reload },
 	{ "status",	cmd_status },
 	{ "features",	cmd_features },
+	{ "limits",	cmd_limits },
 	{ "version",	cmd_version },
 	{ "user",	cmd_user },
 	{ "share",	cmd_share },

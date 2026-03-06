@@ -10,12 +10,14 @@
 #include <glib.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <grp.h>
 
 #include "linux/ksmbd_server.h"
 #include "management/share.h"
 #include "management/user.h"
 #include "config_parser.h"
+#include "ipc.h"
 #include "tools.h"
 
 #define KSMBD_USER_STATE_FREEING	1
@@ -36,6 +38,8 @@ static void kill_ksmbd_user(struct ksmbd_user *user)
 		 (uintptr_t)user);
 
 	g_free(user->name);
+	if (user->pass_b64)
+		explicit_bzero(user->pass_b64, strlen(user->pass_b64));
 	g_free(user->pass_b64);
 	if (user->pass) {
 		explicit_bzero(user->pass, user->pass_sz);
@@ -132,6 +136,16 @@ static struct ksmbd_user *new_ksmbd_user(char *name, char *pwd)
 	}
 
 	user->pass = (char *)base64_decode(user->pass_b64, &pass_sz);
+	if (!user->pass) {
+		pr_err("Failed to decode password for user `%s'\n", name);
+		kill_ksmbd_user(user);
+		return NULL;
+	}
+	if (pass_sz > INT_MAX) {
+		pr_err("Decoded password too large for user `%s'\n", name);
+		kill_ksmbd_user(user);
+		return NULL;
+	}
 	user->pass_sz = (int)pass_sz;
 
 	if (!e)
@@ -326,12 +340,24 @@ void usm_update_user_password(struct ksmbd_user *user, char *pwd)
 	char *pass_b64 = g_strdup(pwd);
 	char *pass = (char *)base64_decode(pass_b64, &pass_sz);
 
+	if (!pass) {
+		pr_err("Failed to decode new password for user `%s'\n",
+		       user->name);
+		g_free(pass_b64);
+		return;
+	}
+
 	pr_debug("New password for user `%s' [0x%" PRIXPTR "]\n",
 		 user->name,
 		 (uintptr_t)user);
 	g_rw_lock_writer_lock(&user->update_lock);
+	if (user->pass_b64)
+		explicit_bzero(user->pass_b64, strlen(user->pass_b64));
 	g_free(user->pass_b64);
-	g_free(user->pass);
+	if (user->pass) {
+		explicit_bzero(user->pass, user->pass_sz);
+		g_free(user->pass);
+	}
 	user->pass_b64 = pass_b64;
 	user->pass = pass;
 	user->pass_sz = (int)pass_sz;
@@ -446,6 +472,7 @@ int usm_handle_login_request_ext(struct ksmbd_login_request *req,
 			     struct ksmbd_login_response_ext *resp)
 {
 	struct ksmbd_user *user;
+	int max_ngroups;
 
 	resp->ngroups = 0;
 
@@ -457,14 +484,35 @@ int usm_handle_login_request_ext(struct ksmbd_login_request *req,
 	if (req->account[0] == '\0')
 		return 0;
 
+	/*
+	 * Cap ngroups to the available payload space. The response
+	 * buffer is allocated as sizeof(*resp) + payload_sz, and the
+	 * total IPC message cannot exceed KSMBD_IPC_MAX_MESSAGE_SIZE.
+	 */
+	max_ngroups = (KSMBD_IPC_MAX_MESSAGE_SIZE -
+		       sizeof(struct ksmbd_login_response_ext)) / sizeof(gid_t);
+
 	user = usm_lookup_user((char *)req->account);
 	if (user) {
-		resp->ngroups = user->ngroups;
+		int ngroups = user->ngroups;
+
+		if (ngroups < 0) {
+			pr_err("User '%s' has invalid group count (%d)\n",
+			       user->name, ngroups);
+			put_ksmbd_user(user);
+			return -EINVAL;
+		}
+		if (ngroups > max_ngroups) {
+			pr_err("User '%s' has too many groups (%d > %d), capping\n",
+			       user->name, ngroups, max_ngroups);
+			ngroups = max_ngroups;
+		}
+		resp->ngroups = ngroups;
 		memcpy(resp->____payload, user->sgid,
-			sizeof(gid_t) * user->ngroups);
+			sizeof(gid_t) * ngroups);
+		put_ksmbd_user(user);
 	}
 
-	put_ksmbd_user(user);
 	return 0;
 }
 
@@ -481,6 +529,7 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 	if (!user)
 		return -ENOENT;
 
+	g_rw_lock_writer_lock(&user->update_lock);
 	if (req->account_flags & KSMBD_USER_FLAG_BAD_PASSWORD) {
 		if (user->failed_login_count < 10)
 			user->failed_login_count++;
@@ -490,6 +539,7 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 		user->failed_login_count = 0;
 		user->flags &= ~KSMBD_USER_FLAG_DELAY_SESSION;
 	}
+	g_rw_lock_writer_unlock(&user->update_lock);
 
 	put_ksmbd_user(user);
 	return 0;

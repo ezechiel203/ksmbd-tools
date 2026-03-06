@@ -177,10 +177,7 @@ cc -std=c11 -Wall -Wextra \
 "$tmpdir/snapshot_tools" > "$tmpdir/tools.out"
 "$tmpdir/snapshot_kernel" > "$tmpdir/kernel.out"
 
-grep -v '^EVENT_MAX=' "$tmpdir/tools.out" > "$tmpdir/tools.common"
-grep -v '^EVENT_MAX=' "$tmpdir/kernel.out" > "$tmpdir/kernel.common"
-
-if ! diff -u "$tmpdir/tools.common" "$tmpdir/kernel.common"; then
+if ! diff -u "$tmpdir/tools.out" "$tmpdir/kernel.out"; then
 	echo "FAIL: common IPC ABI definitions diverged between ksmbd-tools and kernel header" >&2
 	exit 1
 fi
@@ -193,10 +190,10 @@ if [ -z "$tools_event_max" ] || [ -z "$kernel_event_max" ]; then
 	exit 1
 fi
 
-if [ "$kernel_event_max" -lt "$tools_event_max" ]; then
-	echo "FAIL: kernel EVENT_MAX ($kernel_event_max) is smaller than tools EVENT_MAX ($tools_event_max)" >&2
+if [ "$kernel_event_max" -ne "$tools_event_max" ]; then
+	echo "FAIL: EVENT_MAX mismatch (tools=$tools_event_max, kernel=$kernel_event_max)" >&2
 	exit 1
 fi
 
 echo "PASS: ksmbd-tools IPC ABI matches kernel for common messages"
-echo "PASS: kernel EVENT_MAX ($kernel_event_max) is compatible with tools EVENT_MAX ($tools_event_max)"
+echo "PASS: EVENT_MAX is identical (tools=$tools_event_max, kernel=$kernel_event_max)"

@@ -393,7 +393,7 @@ static const struct {
 	{"Fruit Copyfile",	KSMBD_GLOBAL_FLAG_FRUIT_COPYFILE},
 };
 
-static const char *signing_to_str(int signing)
+const char *signing_to_str(int signing)
 {
 	switch (signing) {
 	case KSMBD_CONFIG_OPT_DISABLED:
@@ -438,6 +438,94 @@ int control_features(char *pwddb, char *smbconf)
 		       global_conf.server_max_protocol : "(default)");
 	printf("  %-20s%d\n", "Max Worker Threads:",
 	       global_conf.max_worker_threads);
+
+	remove_config();
+	return 0;
+}
+
+int control_limits(char *pwddb, char *smbconf)
+{
+	int ret;
+
+	ret = load_config(pwddb, smbconf);
+	if (ret) {
+		pr_err("Can't load configuration\n");
+		remove_config();
+		return ret;
+	}
+
+	printf("=== ksmbd Server Limits ===\n\n");
+
+	printf("  Transport Limits:\n");
+	printf("    %-28s%u\n", "TCP Port:",
+	       global_conf.tcp_port ? global_conf.tcp_port : 445);
+	printf("    %-28s%u%s\n", "TCP Recv Timeout:",
+	       global_conf.tcp_recv_timeout ? global_conf.tcp_recv_timeout : 7,
+	       " s (0=default:7)");
+	printf("    %-28s%u%s\n", "TCP Send Timeout:",
+	       global_conf.tcp_send_timeout ? global_conf.tcp_send_timeout : 5,
+	       " s (0=default:5)");
+	printf("    %-28s%u%s\n", "QUIC Recv Timeout:",
+	       global_conf.quic_recv_timeout ? global_conf.quic_recv_timeout : 7,
+	       " s (0=default:7)");
+	printf("    %-28s%u%s\n", "QUIC Send Timeout:",
+	       global_conf.quic_send_timeout ? global_conf.quic_send_timeout : 5,
+	       " s (0=default:5)");
+	printf("    %-28s%u\n", "SMBD Max IO Size:",
+	       global_conf.smbd_max_io_size ? global_conf.smbd_max_io_size :
+					      8388608);
+
+	printf("\n  Connection Limits:\n");
+	printf("    %-28s%u\n", "Max Connections:",
+	       global_conf.max_connections ? global_conf.max_connections : 1024);
+	printf("    %-28s%u\n", "Max IP Connections:",
+	       global_conf.max_ip_connections ?
+		       global_conf.max_ip_connections : 64);
+	printf("    %-28s%u%s\n", "Deadtime:",
+	       global_conf.deadtime, " s");
+
+	printf("\n  Protocol Limits:\n");
+	printf("    %-28s%u\n", "SMB2 Max Read:",
+	       global_conf.smb2_max_read ? global_conf.smb2_max_read : 65536);
+	printf("    %-28s%u\n", "SMB2 Max Write:",
+	       global_conf.smb2_max_write ? global_conf.smb2_max_write : 65536);
+	printf("    %-28s%u\n", "SMB2 Max Trans:",
+	       global_conf.smb2_max_trans ? global_conf.smb2_max_trans : 65536);
+	printf("    %-28s%u\n", "SMB2 Max Credits:",
+	       global_conf.smb2_max_credits ? global_conf.smb2_max_credits :
+					      8192);
+	printf("    %-28s%u\n", "Max Buffer Size:",
+	       global_conf.max_buffer_size ? global_conf.max_buffer_size :
+					     65536);
+	printf("    %-28s%u\n", "Max Lock Count:",
+	       global_conf.max_lock_count ? global_conf.max_lock_count : 64);
+	printf("    %-28s%u\n", "SMB1 Max MPX:",
+	       global_conf.smb1_max_mpx ? global_conf.smb1_max_mpx : 10);
+
+	printf("\n  Session Limits:\n");
+	printf("    %-28s%u\n", "Max Sessions:",
+	       global_conf.max_sessions ? global_conf.max_sessions : 1024);
+	printf("    %-28s%u%s\n", "Session Timeout:",
+	       global_conf.session_timeout ? global_conf.session_timeout : 10,
+	       " s (0=default:10)");
+	printf("    %-28s%u%s\n", "Durable Handle Timeout:",
+	       global_conf.durable_handle_timeout ?
+		       global_conf.durable_handle_timeout : 300000,
+	       " ms (0=default:300000)");
+	printf("    %-28s%lu\n", "Max Open Files:",
+	       global_conf.file_max ? global_conf.file_max : 10000UL);
+
+	printf("\n  Credit/Request Limits:\n");
+	printf("    %-28s%u\n", "Max Inflight Requests:",
+	       global_conf.max_inflight_req ? global_conf.max_inflight_req :
+					      8192);
+	printf("    %-28s%u\n", "Max Async Credits:",
+	       global_conf.max_async_credits ? global_conf.max_async_credits :
+					       512);
+	printf("    %-28s%u%s\n", "IPC Timeout:",
+	       global_conf.ipc_timeout ? global_conf.ipc_timeout : 10, " s");
+
+	printf("\n  (Values of 0 mean 'not configured'; kernel uses built-in defaults)\n");
 
 	remove_config();
 	return 0;

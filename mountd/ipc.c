@@ -8,6 +8,7 @@
 #include <memory.h>
 #include <glib.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdint.h>
 #include <limits.h>
 #include <netlink/netlink.h>
@@ -89,9 +90,10 @@ static int handle_generic_event(struct nl_cache_ops *unused,
 static int nlink_msg_cb(struct nl_msg *msg, void *arg)
 {
 	struct genlmsghdr *gnlh = genlmsg_hdr(nlmsg_hdr(msg));
+	int ret;
 
 	if (gnlh->version != KSMBD_GENL_VERSION) {
-		pr_err("IPC message version mistamtch: %d\n", gnlh->version);
+		pr_err("IPC message version mismatch: %d\n", gnlh->version);
 		return NL_SKIP;
 	}
 
@@ -99,7 +101,18 @@ static int nlink_msg_cb(struct nl_msg *msg, void *arg)
 	nl_msg_dump(msg, stdout);
 #endif
 
-	return genl_handle_msg(msg, NULL);
+	ret = genl_handle_msg(msg, NULL);
+	if (ret == -NLE_RANGE) {
+		/*
+		 * Keep worker alive across kernel/userspace IPC ABI drift by
+		 * skipping unknown generic netlink command ids.
+		 */
+		pr_err("Unsupported IPC command id %u (version %u), skip\n",
+		       gnlh->cmd, gnlh->version);
+		return NL_SKIP;
+	}
+
+	return ret;
 }
 
 static int handle_unsupported_event(struct nl_cache_ops *unused,
@@ -167,6 +180,12 @@ static int ipc_ksmbd_starting_up(void)
 	ev->share_fake_fscaps = global_conf.share_fake_fscaps;
 	memcpy(ev->sub_auth, global_conf.gen_subauth, sizeof(ev->sub_auth));
 	ev->smb2_max_credits = global_conf.smb2_max_credits;
+
+	/*
+	 * Optional configurable limits are stored in the reserved area
+	 * on the phase1 branch. On master, these fields don't exist in
+	 * the startup struct, so we skip them.
+	 */
 
 	if (global_conf.server_min_protocol) {
 		g_strlcpy((char *)ev->min_prot,
@@ -237,22 +256,20 @@ out:
 
 int ipc_process_event(void)
 {
-	fd_set rfds;
-	int sk_fd, ret;
+	struct pollfd pfd;
+	int ret;
 
-	FD_ZERO(&rfds);
+	pfd.fd = nl_socket_get_fd(sk);
+	pfd.events = POLLIN;
 
-	sk_fd = nl_socket_get_fd(sk);
-	FD_SET(sk_fd, &rfds);
-
-	if (select(sk_fd + 1, &rfds, NULL, NULL, NULL) < 0) {
+	ret = poll(&pfd, 1, -1);
+	if (ret < 0) {
 		if (errno != EINTR) {
 			ret = -errno;
 			pr_err("Can't wait on netlink socket: %m\n");
 			return ret;
 		}
-		ret = 0;
-		return ret;
+		return 0;
 	}
 
 	ret = nl_recvmsgs_default(sk);

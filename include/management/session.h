@@ -5,8 +5,8 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
-#ifndef __MANAGEMENT_TCONNECTION_H__
-#define __MANAGEMENT_TCONNECTION_H__
+#ifndef __MANAGEMENT_SESSION_H__
+#define __MANAGEMENT_SESSION_H__
 
 #include <glib.h>
 
@@ -35,4 +35,4 @@ int sm_handle_tree_disconnect(unsigned long long sess_id,
 void sm_destroy(void);
 void sm_init(void);
 
-#endif /* __MANAGEMENT_TCONNECTION_H__ */
+#endif /* __MANAGEMENT_SESSION_H__ */

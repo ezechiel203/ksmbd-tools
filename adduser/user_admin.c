@@ -135,6 +135,7 @@ static void __utf16le_convert(char **password, size_t *sz)
 				 KSMBD_CHARSET_DEFAULT,
 				 NULL,
 				 &bytes_written);
+	explicit_bzero(*password, strlen(*password));
 	g_free(*password);
 
 	*sz = !utf16le ? (size_t)-1 : bytes_written;
@@ -144,9 +145,11 @@ static void __utf16le_convert(char **password, size_t *sz)
 static void __md4_hash(char **password, size_t *sz)
 {
 	struct md4_ctx mctx;
+	size_t old_sz = *sz;
 
 	md4_init(&mctx);
 	md4_update(&mctx, (const unsigned char *)*password, *sz);
+	explicit_bzero(*password, old_sz);
 	g_free(*password);
 
 	*sz = sizeof(mctx.hash) + 1;
@@ -254,6 +257,8 @@ int command_add_user(char *pwddb, char *name, char *password)
 out:
 	g_free(pwddb);
 	g_free(name);
+	if (password)
+		explicit_bzero(password, strlen(password));
 	g_free(password);
 	return ret;
 }
@@ -287,6 +292,8 @@ int command_update_user(char *pwddb, char *name, char *password)
 out:
 	g_free(pwddb);
 	g_free(name);
+	if (password)
+		explicit_bzero(password, strlen(password));
 	g_free(password);
 	return ret;
 }
@@ -366,6 +373,8 @@ int command_delete_user(char *pwddb, char *name, char *password)
 out:
 	g_free(pwddb);
 	g_free(name);
+	if (password)
+		explicit_bzero(password, strlen(password));
 	g_free(password);
 	return ret;
 }

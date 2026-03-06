@@ -72,6 +72,8 @@ static const char *__defconf_fmt[KSMBD_SHARE_CONF_MAX] = {
 	"; expose resource fork sizes in readdir responses [%s]",
 /*35*/	"; expose max access in readdir responses [%s]",
 	"; enable continuous availability for this share [%s]",
+	"; enable alternate data streams via xattr [%s]",
+	"; enable Windows ACL via xattr [%s]",
 };
 
 static char **__get_options(GHashTable *kv, int is_global)
@@ -343,6 +345,8 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_FRUIT_RFORK_SIZE:
 	case KSMBD_SHARE_CONF_FRUIT_MAX_ACCESS:
 	case KSMBD_SHARE_CONF_CONTINUOUS_AVAILABILITY:
+	case KSMBD_SHARE_CONF_STREAMS:
+	case KSMBD_SHARE_CONF_ACL_XATTR:
 		ml = new_va_ml(ml, p, "yes", "no", (const char *)NULL);
 		break;
 	case KSMBD_SHARE_CONF_GUEST_ACCOUNT:

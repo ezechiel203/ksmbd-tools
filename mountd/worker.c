@@ -28,7 +28,7 @@ static GThreadPool *pool;
 #define VALID_IPC_MSG(m, t)					\
 	({							\
 		int ret = 1;					\
-		if (((m)->sz != sizeof(t))) {			\
+		if (((m)->sz < sizeof(t))) {			\
 			pr_err("Bad message: %s\n", __func__);	\
 			ret = 0;				\
 		}						\
@@ -47,8 +47,10 @@ static int login_request(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_ipc_msg *resp_msg;
 
 	resp_msg = ipc_msg_alloc(sizeof(*resp));
-	if (!resp_msg)
+	if (!resp_msg) {
+		pr_err("Failed to allocate login response message\n");
 		goto out;
+	}
 
 	req = KSMBD_IPC_MSG_PAYLOAD(msg);
 	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
@@ -98,8 +100,10 @@ static int login_request_ext(struct ksmbd_ipc_msg *msg)
 
 	payload_sz = login_response_payload_sz(req->account);
 	resp_msg = ipc_msg_alloc(sizeof(*resp) + payload_sz);
-	if (!resp_msg)
+	if (!resp_msg) {
+		pr_err("Failed to allocate login ext response message\n");
 		goto out;
+	}
 
 	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
 
@@ -189,7 +193,11 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	memcpy(resp->payload + auth_out.key_len, auth_out.spnego_blob,
 			auth_out.blob_len);
 out_free_auth:
+	if (auth_out.spnego_blob)
+		explicit_bzero(auth_out.spnego_blob, auth_out.blob_len);
 	g_free(auth_out.spnego_blob);
+	if (auth_out.sess_key)
+		explicit_bzero(auth_out.sess_key, auth_out.key_len);
 	g_free(auth_out.sess_key);
 	g_free(auth_out.user_name);
 out:
@@ -207,8 +215,10 @@ static int tree_connect_request(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_ipc_msg *resp_msg;
 
 	resp_msg = ipc_msg_alloc(sizeof(*resp));
-	if (!resp_msg)
+	if (!resp_msg) {
+		pr_err("Failed to allocate tree connect response message\n");
 		goto out;
+	}
 
 	req = KSMBD_IPC_MSG_PAYLOAD(msg);
 	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
@@ -260,8 +270,10 @@ static int share_config_request(struct ksmbd_ipc_msg *msg)
 	}
 
 	resp_msg = ipc_msg_alloc(sizeof(*resp) + payload_sz);
-	if (!resp_msg)
+	if (!resp_msg) {
+		pr_err("Failed to allocate share config response message\n");
 		goto out;
+	}
 
 	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
 	resp->payload_sz = payload_sz;
@@ -325,6 +337,11 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 		goto out;
 
 	req = KSMBD_IPC_MSG_PAYLOAD(msg);
+	if (req->payload_sz > msg->sz - sizeof(struct ksmbd_rpc_command)) {
+		pr_err("RPC: payload_sz %u exceeds message size\n",
+		       req->payload_sz);
+		goto out;
+	}
 	if (req->flags & KSMBD_RPC_METHOD_RETURN)
 		resp_msg = ipc_msg_alloc(KSMBD_IPC_MAX_MESSAGE_SIZE -
 				sizeof(struct ksmbd_rpc_command));
@@ -426,18 +443,28 @@ void wp_destroy(void)
 	}
 }
 
-void wp_init(void)
+int wp_init(void)
 {
 	int num_threads = global_conf.max_worker_threads;
+	GError *error = NULL;
 
 	if (num_threads < 1 || num_threads > MAX_WORKER_THREADS)
 		num_threads = DEFAULT_WORKER_THREADS;
 
-	if (!pool)
+	if (!pool) {
 		pool = g_thread_pool_new(
 			worker_pool_fn,
 			NULL,
 			num_threads,
 			0,
-			NULL);
+			&error);
+		if (!pool) {
+			pr_err("Failed to create worker thread pool: %s\n",
+			       error ? error->message : "unknown error");
+			if (error)
+				g_error_free(error);
+			return -ENOMEM;
+		}
+	}
+	return 0;
 }

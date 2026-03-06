@@ -10,8 +10,6 @@
 
 #include <smbacl.h>
 
-#define HANDLE_SIZE	20
-
 struct ksmbd_rpc_command;
 struct ksmbd_rpc_pipe;
 

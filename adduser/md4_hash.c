@@ -19,6 +19,7 @@
 
 #include <stdlib.h>
 #include <memory.h>
+#include <string.h>
 #include <md4_hash.h>
 #include <asm/byteorder.h>
 
@@ -216,5 +217,5 @@ void md4_final(struct md4_ctx *mctx, u8 *out)
 	md4_transform(mctx->hash, mctx->block);
 	cpu_to_le32_array(mctx->hash, ARRAY_SIZE(mctx->hash));
 	memcpy(out, mctx->hash, sizeof(mctx->hash));
-	memset(mctx, 0, sizeof(*mctx));
+	explicit_bzero(mctx, sizeof(*mctx));
 }

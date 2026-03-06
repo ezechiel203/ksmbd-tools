@@ -16,15 +16,15 @@
 #define NUM_AUTHS (6)	/* number of authority fields */
 #define SID_MAX_SUB_AUTHORITIES (15) /* max number of sub authority fields */
 
-#define ACCESS_ALLOWED	0
-#define ACCESS_DENIED	1
+#define SMB_ACCESS_ALLOWED	0
+#define SMB_ACCESS_DENIED	1
 
 /* Control flags for Security Descriptor */
-#define OWNER_DEFAULTED		0x0001
-#define GROUP_DEFAULTED		0x0002
-#define DACL_PRESENT		0x0004
+#define SMB_OWNER_DEFAULTED		0x0001
+#define SMB_GROUP_DEFAULTED		0x0002
+#define SMB_DACL_PRESENT		0x0004
 #define DACL_DEFAULTED		0x0008
-#define SACL_PRESENT		0x0010
+#define SMB_SACL_PRESENT		0x0010
 #define SACL_DEFAULTED		0x0020
 #define DACL_TRUSTED		0x0040
 #define SERVER_SECURITY		0x0080
@@ -35,11 +35,11 @@
 #define DACL_PROTECTED		0x1000
 #define SACL_PROTECTED		0x2000
 #define RM_CONTROL_VALID	0x4000
-#define SELF_RELATIVE		0x8000
+#define SMB_SELF_RELATIVE		0x8000
 
-#define SID_TYPE_USER		1
-#define SID_TYPE_GROUP		2
-#define SID_TYPE_UNKNOWN	8
+#define SMB_SID_TYPE_USER		1
+#define SMB_SID_TYPE_GROUP		2
+#define SMB_SID_TYPE_UNKNOWN	8
 
 struct smb_ntsd {
 	__u16 revision; /* revision level */
@@ -48,20 +48,20 @@ struct smb_ntsd {
 	__u32 gsidoffset;
 	__u32 sacloffset;
 	__u32 dacloffset;
-};
+} __packed;
 
 struct smb_sid {
 	__u8 revision; /* revision level */
 	__u8 num_subauth;
 	__u8 authority[NUM_AUTHS];
 	__u32 sub_auth[SID_MAX_SUB_AUTHORITIES]; /* sub_auth[num_subauth] */
-};
+} __packed;
 
 struct smb_acl {
 	__u16 revision; /* revision level */
 	__u16 size;
 	__u32 num_aces;
-};
+} __packed;
 
 struct smb_ace {
 	__u8 type;
@@ -69,7 +69,7 @@ struct smb_ace {
 	__u16 size;
 	__u32 access_req;
 	struct smb_sid sid; /* ie UUID of user or group who gets these perms */
-};
+} __packed;
 
 void smb_init_domain_sid(struct smb_sid *sid);
 int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid);

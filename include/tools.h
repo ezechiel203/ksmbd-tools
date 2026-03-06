@@ -23,6 +23,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
 #include <stdbool.h>
 
 #ifdef HAVE_CONFIG_H
@@ -66,6 +67,19 @@ struct smbconf_global {
 	char			*pwddb;
 	char			*smbconf;
 	pid_t			pid;
+	/* Optional configurable limits (0 = not set, use kernel default) */
+	unsigned int		tcp_recv_timeout;
+	unsigned int		tcp_send_timeout;
+	unsigned int		quic_recv_timeout;
+	unsigned int		quic_send_timeout;
+	unsigned int		max_lock_count;
+	unsigned int		max_buffer_size;
+	unsigned int		session_timeout;
+	unsigned int		durable_handle_timeout;
+	unsigned int		max_inflight_req;
+	unsigned int		max_async_credits;
+	unsigned int		max_sessions;
+	unsigned int		smb1_max_mpx;
 };
 
 #define KSMBD_RESTRICT_ANON_TYPE_1	1
@@ -93,7 +107,7 @@ extern struct smbconf_global global_conf;
 #define KSMBD_SHOULD_RELOAD_CONFIG	(1 << 1)
 #define KSMBD_SHOULD_LIST_CONFIG	(1 << 2)
 
-extern int ksmbd_health_status;
+extern volatile sig_atomic_t ksmbd_health_status;
 
 #define TRACING_DUMP_NL_MSG	0
 

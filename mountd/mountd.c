@@ -30,10 +30,10 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.mountd [-v] [-j] [-F] [-p PORT] [-n[WAY]] [-C CONF] [-P PWDDB]\n");
+		"Usage: ksmbdctl start [-v] [-j] [-F] [-p PORT] [-n[WAY]] [-C CONF] [-P PWDDB]\n");
 
 	if (status != EXIT_SUCCESS)
-		printf("Try `ksmbd.mountd --help' for more information.\n");
+		printf("Try `ksmbdctl start --help' for more information.\n");
 	else
 		printf(
 			"\n"
@@ -51,7 +51,7 @@ static void usage(int status)
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
 			"\n"
-			"See ksmbd.mountd(8) for more details.\n");
+			"See ksmbdctl(8) for more details.\n");
 }
 
 static struct option opts[] = {
@@ -90,15 +90,15 @@ static void worker_sa_sigaction(int signo, siginfo_t *siginfo, void *ucontext)
 	case SIGCHLD:
 		return;
 	case SIGHUP:
-		ksmbd_health_status |= KSMBD_SHOULD_RELOAD_CONFIG;
+		ksmbd_health_status = ksmbd_health_status | KSMBD_SHOULD_RELOAD_CONFIG;
 		return;
 	case SIGUSR1:
-		ksmbd_health_status |= KSMBD_SHOULD_LIST_CONFIG;
+		ksmbd_health_status = ksmbd_health_status | KSMBD_SHOULD_LIST_CONFIG;
 		return;
 	case SIGINT:
 	case SIGQUIT:
 	case SIGTERM:
-		ksmbd_health_status &= ~KSMBD_HEALTH_RUNNING;
+		ksmbd_health_status = ksmbd_health_status & ~KSMBD_HEALTH_RUNNING;
 		return;
 	}
 

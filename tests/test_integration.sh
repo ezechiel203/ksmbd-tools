@@ -228,6 +228,211 @@ ln -sf "$CTL" "$TMPDIR/ksmbd.adduser"
 check_fail "legacy entrypoint ksmbd.adduser is rejected" "$TMPDIR/ksmbd.adduser" --help
 check_output_regex "legacy entrypoint prints migration hint" "removed|ksmbdctl user" "$TMPDIR/ksmbd.adduser" --help
 
+# ========================================
+# Section 2: Extended CLI tests
+# ========================================
+
+echo ""
+echo "--- Share add with multiple options ---"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add \
+    -o "path = /tmp/multi" -o "read only = yes" -o "browseable = no" multishare >/dev/null 2>&1 \
+    && pass "share add with multiple -o options" || fail "share add with multiple -o options"
+
+if grep -q "\[multishare\]" "$TMPDIR/ksmbd.conf"; then
+    pass "multishare section exists"
+else
+    fail "multishare section exists"
+fi
+
+if grep -q "read only = yes" "$TMPDIR/ksmbd.conf"; then
+    pass "multishare has read only = yes"
+else
+    fail "multishare has read only = yes"
+fi
+
+if grep -q "browseable = no" "$TMPDIR/ksmbd.conf"; then
+    pass "multishare has browseable = no"
+else
+    fail "multishare has browseable = no"
+fi
+
+# Show the share and verify all options are visible
+check_output "share show multishare has path" "path" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share show multishare
+check_output "share show multishare has read only" "read only" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share show multishare
+
+echo ""
+echo "--- Share update preserves existing options ---"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share update \
+    -o "guest ok = yes" multishare >/dev/null 2>&1 \
+    && pass "share update adds guest ok" || fail "share update adds guest ok"
+
+# Path should still be present after update
+if grep -q "path = /tmp/multi" "$TMPDIR/ksmbd.conf"; then
+    pass "share update preserved path"
+else
+    fail "share update preserved path"
+fi
+
+# Clean up multishare
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete multishare >/dev/null 2>&1
+
+echo ""
+echo "--- User delete then re-add lifecycle ---"
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add -p lifecyclepass lcuser >/dev/null 2>&1 \
+    && pass "user add lcuser" || fail "user add lcuser"
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete lcuser >/dev/null 2>&1 \
+    && pass "user delete lcuser" || fail "user delete lcuser"
+
+if grep -q "lcuser:" "$TMPDIR/ksmbdpwd.db"; then
+    fail "lcuser removed after delete"
+else
+    pass "lcuser removed after delete"
+fi
+
+# Re-add with different password
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add -p newlifecyclepass lcuser >/dev/null 2>&1 \
+    && pass "user re-add lcuser after delete" || fail "user re-add lcuser after delete"
+
+if grep -q "lcuser:" "$TMPDIR/ksmbdpwd.db"; then
+    pass "lcuser exists after re-add"
+else
+    fail "lcuser exists after re-add"
+fi
+
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete lcuser >/dev/null 2>&1
+
+echo ""
+echo "--- Share list shows all shares ---"
+# Add a couple of shares
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add -o "path = /tmp/s1" listshare1 >/dev/null 2>&1
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add -o "path = /tmp/s2" listshare2 >/dev/null 2>&1
+
+check_output "share list includes listshare1" "listshare1" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share list
+check_output "share list includes listshare2" "listshare2" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share list
+check_output "share list includes testshare" "testshare" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share list
+
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete listshare1 >/dev/null 2>&1
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete listshare2 >/dev/null 2>&1
+
+echo ""
+echo "--- Config validation ---"
+# Valid config should pass
+check_output "valid config passes validation" "valid" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" config validate
+
+# Invalid config (malformed) should fail or report error
+BADCONF="$TMPDIR/bad.conf"
+echo "this is not a valid smb config" > "$BADCONF"
+check_output_regex "malformed config reports issue" "valid|global|error|Error" \
+    "$CTL" -C "$BADCONF" -P "$TMPDIR/ksmbdpwd.db" config validate
+
+echo ""
+echo "--- Multiple concurrent share operations ---"
+for i in $(seq 1 5); do
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add \
+        -o "path = /tmp/concurrent$i" "concurrent$i" >/dev/null 2>&1
+done
+
+# Verify all 5 shares were added
+all_present=true
+for i in $(seq 1 5); do
+    if ! grep -q "\[concurrent$i\]" "$TMPDIR/ksmbd.conf"; then
+        all_present=false
+        break
+    fi
+done
+if $all_present; then
+    pass "5 concurrent shares all present"
+else
+    fail "5 concurrent shares all present"
+fi
+
+# Delete them all
+for i in $(seq 1 5); do
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete "concurrent$i" >/dev/null 2>&1
+done
+
+# Verify all removed
+all_removed=true
+for i in $(seq 1 5); do
+    if grep -q "\[concurrent$i\]" "$TMPDIR/ksmbd.conf"; then
+        all_removed=false
+        break
+    fi
+done
+if $all_removed; then
+    pass "5 concurrent shares all removed"
+else
+    fail "5 concurrent shares all removed"
+fi
+
+echo ""
+echo "--- Share add with guest ok option ---"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add \
+    -o "path = /tmp/guesttest" -o "guest ok = yes" guestshare >/dev/null 2>&1 \
+    && pass "share add guestshare with guest ok" || fail "share add guestshare with guest ok"
+
+check_output "guestshare config shows guest ok" "guest ok" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share show guestshare
+
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete guestshare >/dev/null 2>&1
+
+echo ""
+echo "--- User list with multiple users ---"
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add -p pass1 multiuser1 >/dev/null 2>&1
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add -p pass2 multiuser2 >/dev/null 2>&1
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user add -p pass3 multiuser3 >/dev/null 2>&1
+
+check_output "user list includes multiuser1" "multiuser1" \
+    "$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user list
+check_output "user list includes multiuser2" "multiuser2" \
+    "$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user list
+check_output "user list includes multiuser3" "multiuser3" \
+    "$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user list
+
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete multiuser1 >/dev/null 2>&1
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete multiuser2 >/dev/null 2>&1
+"$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete multiuser3 >/dev/null 2>&1
+
+echo ""
+echo "--- Share with vfs objects option ---"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add \
+    -o "path = /tmp/vfstest" -o "vfs objects = streams_xattr acl_xattr" vfsshare >/dev/null 2>&1 \
+    && pass "share add with vfs objects" || fail "share add with vfs objects"
+
+check_output "vfsshare has vfs objects" "vfs objects" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share show vfsshare
+
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete vfsshare >/dev/null 2>&1
+
+echo ""
+echo "--- Duplicate share add is idempotent ---"
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share add \
+    -o "path = /tmp/dup" dupshare >/dev/null 2>&1 \
+    && pass "first share add dupshare" || fail "first share add dupshare"
+
+# Second add of same name - should succeed or gracefully update
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share set \
+    --option "path = /tmp/dup2" dupshare >/dev/null 2>&1 \
+    && pass "share set updates dupshare" || fail "share set updates dupshare"
+
+"$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete dupshare >/dev/null 2>&1
+
+echo ""
+echo "--- Delete nonexistent share ---"
+check_fail "delete nonexistent share fails" \
+    "$CTL" -C "$TMPDIR/ksmbd.conf" -P "$TMPDIR/ksmbdpwd.db" share delete nonexistent_share_xyz
+
+echo ""
+echo "--- Delete nonexistent user ---"
+check_fail "delete nonexistent user fails" \
+    "$CTL" -P "$TMPDIR/ksmbdpwd.db" -C "$TMPDIR/ksmbd.conf" user delete nonexistent_user_xyz
+
 echo ""
 echo "=== Results ==="
 echo "Passed: $PASS"

@@ -31,7 +31,7 @@ static inline void clear_conn_flag(struct ksmbd_tree_conn *conn, int bit)
 
 static inline int test_conn_flag(struct ksmbd_tree_conn *conn, int bit)
 {
-	return conn->flags & bit;
+	return !!(conn->flags & bit);
 }
 
 void tcm_tree_conn_free(struct ksmbd_tree_conn *conn);

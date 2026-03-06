@@ -69,6 +69,8 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"fruit resource fork size",
 /*35*/	"fruit max access",
 	"continuous availability",
+	"streams",
+	"acl xattr",
 };
 
 /*
@@ -115,6 +117,8 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"yes",
 	"no",
 /*35*/	"yes",
+	"no",
+	"no",
 	"no",
 };
 
@@ -428,8 +432,10 @@ static void add_users_map(struct ksmbd_share *share,
 			continue;
 		}
 
-		if (g_hash_table_lookup(share->maps[map], user->name))
+		if (g_hash_table_lookup(share->maps[map], user->name)) {
+			put_ksmbd_user(user);
 			continue;
+		}
 
 		g_hash_table_insert(share->maps[map], user->name, user);
 	}
@@ -779,6 +785,20 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 		cp_group_kv_list_free(objects);
 	}
 
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_STREAMS, &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
+		else
+			clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_ACL_XATTR, &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
+		else
+			clear_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
+	}
+
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_CROSSMNT, &k, &v)) {
 		if (cp_get_group_kv_bool(v))
 			set_share_flag(share, KSMBD_SHARE_FLAG_CROSSMNT);
@@ -890,7 +910,7 @@ int shm_lookup_users_map(struct ksmbd_share *share,
 
 	if (map >= KSMBD_SHARE_USERS_MAX) {
 		pr_err("Invalid users map index: %d\n", map);
-		return 0;
+		return -EINVAL;
 	}
 
 	if (!share->maps[map])
@@ -993,7 +1013,7 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 
 	if (map >= KSMBD_SHARE_HOSTS_MAX) {
 		pr_err("Invalid hosts map index: %d\n", map);
-		return 0;
+		return -EINVAL;
 	}
 
 	if (map == KSMBD_SHARE_HOSTS_ALLOW_MAP)
@@ -1022,10 +1042,11 @@ int shm_open_connection(struct ksmbd_share *share)
 	int ret = 0;
 
 	g_rw_lock_writer_lock(&share->update_lock);
-	share->num_connections++;
-	if (share->max_connections) {
-		if (share->num_connections >= share->max_connections)
-			ret = -EINVAL;
+	if (share->max_connections &&
+	    share->num_connections >= share->max_connections) {
+		ret = -EINVAL;
+	} else {
+		share->num_connections++;
 	}
 	g_rw_lock_writer_unlock(&share->update_lock);
 	return ret;
@@ -1037,7 +1058,8 @@ int shm_close_connection(struct ksmbd_share *share)
 		return 0;
 
 	g_rw_lock_writer_lock(&share->update_lock);
-	share->num_connections--;
+	if (share->num_connections > 0)
+		share->num_connections--;
 	g_rw_lock_writer_unlock(&share->update_lock);
 	return 0;
 }

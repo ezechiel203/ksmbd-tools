@@ -25,7 +25,7 @@
 #include "version.h"
 
 int log_level = PR_INFO;
-int ksmbd_health_status;
+volatile sig_atomic_t ksmbd_health_status;
 tool_main_fn *tool_main;
 
 static int log_open;
@@ -266,9 +266,10 @@ char *base64_encode(unsigned char *src, size_t srclen)
 unsigned char *base64_decode(char const *src, size_t *dstlen)
 {
 	unsigned char *ret = g_base64_decode(src, dstlen);
-
-	if (ret)
+	if (ret) {
+		ret = g_realloc(ret, *dstlen + 1);
 		ret[*dstlen] = 0x00;
+	}
 	return ret;
 }
 
@@ -372,7 +373,7 @@ void gptrarray_printf(GPtrArray *gptrarray, const char *fmt, ...)
 int set_conf_contents(const char *conf, const char *contents)
 {
 	GError *error = NULL;
-	mode_t mask = umask(~(S_IRUSR | S_IWUSR | S_IRGRP));
+	mode_t mask = umask(~(S_IRUSR | S_IWUSR));
 
 	g_file_set_contents(conf, contents, -1, &error);
 	umask(mask);
@@ -415,7 +416,9 @@ int load_config(char *pwddb, char *smbconf)
 		rpc_init();
 		ipc_init();
 		spnego_init();
-		wp_init();
+		ret = wp_init();
+		if (ret)
+			return ret;
 	}
 
 	return 0;
@@ -450,17 +453,17 @@ int set_tool_main(char *name)
 const char *get_tool_name(void)
 {
 	if (TOOL_IS_ADDSHARE)
-		return "ksmbd.addshare";
+		return "ksmbdctl(share)";
 	if (TOOL_IS_ADDUSER)
-		return "ksmbd.adduser";
+		return "ksmbdctl(user)";
 	if (TOOL_IS_CONTROL)
-		return "ksmbd.control";
+		return "ksmbdctl(control)";
 	if (TOOL_IS_MOUNTD) {
 		if (getppid() == global_conf.pid)
-			return "ksmbd.mountd(worker)";
+			return "ksmbdctl(start/worker)";
 		if (getpid() == global_conf.pid)
-			return "ksmbd.mountd(manager)";
-		return "ksmbd.mountd";
+			return "ksmbdctl(start/manager)";
+		return "ksmbdctl(start)";
 	}
 	if (tool_main == ksmbdctl_main)
 		return "ksmbdctl";

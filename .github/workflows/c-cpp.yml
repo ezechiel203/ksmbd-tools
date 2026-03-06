@@ -47,17 +47,105 @@ jobs:
       run: |
         mkdir meson-no-krb5-build
         cd meson-no-krb5-build
-        meson -Dkrb5=disabled ..
+        meson -Dkrb5=disabled -Dsystemd=disabled ..
+        meson compile
+    - name: meson test without krb5
+      run: |
+        cd meson-no-krb5-build
+        meson test --print-errorlogs
+    - name: meson dist without krb5
+      run: |
+        cd meson-no-krb5-build
         meson dist
     - name: meson build with mit krb5
       run: |
         mkdir meson-mit-krb5-build
         cd meson-mit-krb5-build
         meson -Dkrb5=enabled -Dkrb5_name=mit-krb5 ..
+        meson compile
+    - name: meson test with mit krb5
+      run: |
+        cd meson-mit-krb5-build
+        meson test --print-errorlogs
+    - name: meson dist with mit krb5
+      run: |
+        cd meson-mit-krb5-build
         meson dist
     - name: meson build with heimdal krb5
       run: |
         mkdir meson-heimdal-krb5-build
         cd meson-heimdal-krb5-build
         meson -Dkrb5=enabled -Dkrb5_name=heimdal-krb5 ..
+        meson compile
+    - name: meson test with heimdal krb5
+      run: |
+        cd meson-heimdal-krb5-build
+        meson test --print-errorlogs
+    - name: meson dist with heimdal krb5
+      run: |
+        cd meson-heimdal-krb5-build
         meson dist
+
+  # -------------------------------------------------------------------
+  # Code coverage: build with gcov instrumentation and generate report
+  # -------------------------------------------------------------------
+  coverage:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libnl-3-dev libnl-genl-3-dev ninja-build libglib2.0-dev \
+          gcovr
+        pip3 install --user meson
+    - name: Build with coverage
+      run: |
+        PATH=$HOME/.local/bin:$PATH
+        meson setup build-cov -Dkrb5=disabled -Dsystemd=disabled -Db_coverage=true
+        meson compile -C build-cov
+    - name: Run tests with coverage
+      run: |
+        PATH=$HOME/.local/bin:$PATH
+        meson test -C build-cov --print-errorlogs
+    - name: Generate coverage report
+      run: |
+        PATH=$HOME/.local/bin:$PATH
+        ninja -C build-cov coverage-text || \
+          gcovr --root . --object-directory build-cov --print-summary
+    - name: Upload coverage report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          build-cov/meson-logs/coverage*
+          build-cov/meson-logs/testlog.txt
+
+  # -------------------------------------------------------------------
+  # AddressSanitizer: catch memory errors (use-after-free, overflow, leaks)
+  # -------------------------------------------------------------------
+  asan:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libnl-3-dev libnl-genl-3-dev ninja-build libglib2.0-dev
+        pip3 install --user meson
+    - name: Build with AddressSanitizer
+      run: |
+        PATH=$HOME/.local/bin:$PATH
+        meson setup build-asan -Dkrb5=disabled -Dsystemd=disabled -Db_sanitize=address
+        meson compile -C build-asan
+    - name: Run tests with AddressSanitizer
+      run: |
+        PATH=$HOME/.local/bin:$PATH
+        meson test -C build-asan --print-errorlogs

@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <ctype.h>
+#include <string.h>
 
 #include "config_parser.h"
 #include "tools.h"
@@ -27,10 +28,10 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.adduser [-v] [-P PWDDB] [-c CONF] [-a | -u | -d] [-p PWD] USER\n");
+		"Usage: ksmbdctl user add|update|delete [-v] [-P PWDDB] [-c CONF] [-p PWD] USER\n");
 
 	if (status != EXIT_SUCCESS)
-		printf("Try `ksmbd.adduser --help' for more information.\n");
+		printf("Try `ksmbdctl user --help' for more information.\n");
 	else
 		printf(
 			"\n"
@@ -51,7 +52,7 @@ static void usage(int status)
 			"  -V, --version         output version information and exit\n"
 			"  -h, --help            display this help and exit\n"
 			"\n"
-			"See ksmbd.adduser(8) for more details.\n");
+			"See ksmbdctl(8) for more details.\n");
 }
 
 static const struct option opts[] = {
@@ -89,6 +90,8 @@ int adduser_main(int argc, char **argv)
 		case 'p':
 			g_free(password);
 			password = g_strdup(optarg);
+			if (optarg)
+				explicit_bzero(optarg, strlen(optarg));
 			break;
 		case 'P':
 			g_free(pwddb);
@@ -161,8 +164,10 @@ int adduser_main(int argc, char **argv)
 		goto out;
 	}
 
-	pr_info("Notified mountd\n");
+	pr_info("Notified ksmbdctl start daemon\n");
 out:
+	if (password)
+		explicit_bzero(password, strlen(password));
 	remove_config();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

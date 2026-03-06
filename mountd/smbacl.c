@@ -38,7 +38,7 @@ int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid)
 		return -EINVAL;
 	if (ndr_read_int8(dce, &sid->num_subauth))
 		return -EINVAL;
-	if (!sid->num_subauth || sid->num_subauth >= SID_MAX_SUB_AUTHORITIES)
+	if (!sid->num_subauth || sid->num_subauth > SID_MAX_SUB_AUTHORITIES)
 		return -EINVAL;
 	for (i = 0; i < NUM_AUTHS; ++i)
 		if (ndr_read_int8(dce, &sid->authority[i]))
@@ -52,6 +52,9 @@ int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid)
 int smb_write_sid(struct ksmbd_dcerpc *dce, const struct smb_sid *src)
 {
 	int i;
+
+	if (src->num_subauth > SID_MAX_SUB_AUTHORITIES)
+		return -EINVAL;
 
 	if (ndr_write_int8(dce, src->revision))
 		return -ENOMEM;
@@ -74,6 +77,9 @@ int smb_write_sid(struct ksmbd_dcerpc *dce, const struct smb_sid *src)
 void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src)
 {
 	int i;
+
+	if (src->num_subauth > SID_MAX_SUB_AUTHORITIES)
+		return;
 
 	dst->revision = src->revision;
 	dst->num_subauth = src->num_subauth;
@@ -146,13 +152,13 @@ static int smb_sid_to_string(char *domain, size_t domain_len,
 	len = snprintf(domain, domain_len, "S-%i-%i", (int)sid->revision,
 		       (int)sid->authority[5]);
 
-	if (len < 0 || len > domain_len)
+	if (len < 0 || len >= domain_len)
 		return -ENOMEM;
 
 	for (i = 0; i < sid->num_subauth; i++) {
 		len += snprintf(domain + len, domain_len - len, "-%u",
 				sid->sub_auth[i]);
-		if (len < 0 || len > domain_len)
+		if (len < 0 || len >= domain_len)
 			return -ENOMEM;
 	}
 
@@ -180,19 +186,19 @@ int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len,
 		if (ret < 0 || ret >= domain_len)
 			return -ENOMEM;
 
-		*type = SID_TYPE_USER;
+		*type = SMB_SID_TYPE_USER;
 	} else if (!smb_compare_sids(sid, &sid_unix_users)) {
 		ret = snprintf(domain, domain_len, "Unix User");
 		if (ret < 0 || ret >= domain_len)
 			return -ENOMEM;
 
-		*type = SID_TYPE_USER;
+		*type = SMB_SID_TYPE_USER;
 	} else if (!smb_compare_sids(sid, &sid_unix_groups)) {
 		ret = snprintf(domain, domain_len, "Unix Group");
 		if (ret < 0 || ret >= domain_len)
 			return -ENOMEM;
 
-		*type = SID_TYPE_GROUP;
+		*type = SMB_SID_TYPE_GROUP;
 	} else {
 		ret = smb_sid_to_string(domain_string, sizeof(domain_string),
 					sid);
@@ -210,7 +216,7 @@ int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len,
 		if (ret < 0 || ret >= domain_len)
 			return -ENOMEM;
 
-		*type = SID_TYPE_UNKNOWN;
+		*type = SMB_SID_TYPE_UNKNOWN;
 		ret = -ENOENT;
 	}
 	return ret;
@@ -224,7 +230,7 @@ static int smb_set_ace(struct ksmbd_dcerpc *dce, int access_req, int rid,
 
 	memcpy(&sid, rsid, sizeof(struct smb_sid));
 	// ace type
-	if (ndr_write_int8(dce, ACCESS_ALLOWED))
+	if (ndr_write_int8(dce, SMB_ACCESS_ALLOWED))
 		return -ENOMEM;
 
 	// ace flags
@@ -243,8 +249,11 @@ static int smb_set_ace(struct ksmbd_dcerpc *dce, int access_req, int rid,
 	if (ndr_write_int32(dce, access_req))
 		return -ENOMEM;
 
-	if (rid)
+	if (rid) {
+		if (sid.num_subauth >= SID_MAX_SUB_AUTHORITIES)
+			return -EINVAL;
 		sid.sub_auth[sid.num_subauth++] = rid;
+	}
 
 	if (smb_write_sid(dce, &sid))
 		return -ENOMEM;
@@ -277,6 +286,8 @@ static int set_dacl(struct ksmbd_dcerpc *dce, int rid)
 
 	/* Owner RID */
 	memcpy(&owner_domain, &sid_domain, sizeof(struct smb_sid));
+	if (owner_domain.num_subauth + 3 > SID_MAX_SUB_AUTHORITIES)
+		return -EINVAL;
 	for (i = 0; i < 3; ++i) {
 		owner_domain.sub_auth[i + 1] = global_conf.gen_subauth[i];
 		owner_domain.num_subauth++;
@@ -290,6 +301,8 @@ static int set_dacl(struct ksmbd_dcerpc *dce, int rid)
 	return size;
 }
 
+#define KSMBD_NUM_DEFAULT_ACES 4
+
 int build_sec_desc(struct ksmbd_dcerpc *dce, __u32 *secdesclen, int rid)
 {
 	int l_offset, acl_size_offset;
@@ -300,7 +313,7 @@ int build_sec_desc(struct ksmbd_dcerpc *dce, __u32 *secdesclen, int rid)
 		return -ENOMEM;
 
 	/* ACL Type */
-	if (ndr_write_int16(dce, SELF_RELATIVE | DACL_PRESENT))
+	if (ndr_write_int16(dce, SMB_SELF_RELATIVE | SMB_DACL_PRESENT))
 		return -ENOMEM;
 
 	/* Offset to owner SID */
@@ -327,7 +340,7 @@ int build_sec_desc(struct ksmbd_dcerpc *dce, __u32 *secdesclen, int rid)
 	dce->offset += 2;
 
 	/* Number of ACEs */
-	if (ndr_write_int32(dce, 4))
+	if (ndr_write_int32(dce, KSMBD_NUM_DEFAULT_ACES))
 		return -ENOMEM;
 
 	acl_size = set_dacl(dce, rid) + sizeof(struct smb_acl);

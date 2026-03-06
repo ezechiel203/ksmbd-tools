@@ -305,10 +305,16 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 				mech_ctx->oid, mech_ctx->oid_len,
 				&auth_out->spnego_blob, &auth_out->blob_len)) {
 		g_free(auth_out->user_name);
+		explicit_bzero(auth_out->sess_key, auth_out->key_len);
 		g_free(auth_out->sess_key);
 		goto out_free_client;
 	}
 
+	/*
+	 * Caller must zero auth_out->sess_key (key_len bytes) and
+	 * auth_out->spnego_blob (blob_len bytes) before freeing them
+	 * to avoid leaving sensitive key material in memory.
+	 */
 	pr_info("Authenticated user `%s'\n", auth_out->user_name);
 	retval = 0;
 
