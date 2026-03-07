@@ -275,13 +275,16 @@ static __u8 noop_int8(__u8 v)
 #define NDR_WRITE_INT(name, type, be, le)				\
 int ndr_write_##name(struct ksmbd_dcerpc *dce, type value)		\
 {									\
+	type enc;							\
+									\
 	align_offset(dce, sizeof(type));				\
 	if (try_realloc_payload(dce, sizeof(value)))			\
 		return -ENOMEM;						\
 	if (dce->flags & KSMBD_DCERPC_LITTLE_ENDIAN)			\
-		*(type *)PAYLOAD_HEAD(dce) = le(value);			\
+		enc = le(value);					\
 	else								\
-		*(type *)PAYLOAD_HEAD(dce) = be(value);			\
+		enc = be(value);					\
+	memcpy(PAYLOAD_HEAD(dce), &enc, sizeof(enc));			\
 	dce->offset += sizeof(value);					\
 	return 0;							\
 }
@@ -294,16 +297,18 @@ NDR_WRITE_INT(int64, __u64, htobe64, htole64);
 #define NDR_READ_INT(name, type, be, le)				\
 int ndr_read_##name(struct ksmbd_dcerpc *dce, type *value)		\
 {									\
+	type raw;							\
 	type ret;							\
 									\
 	align_offset(dce, sizeof(type));				\
 	if (dce->offset + sizeof(type) > dce->payload_sz)		\
 		return -EINVAL;						\
+	memcpy(&raw, PAYLOAD_HEAD(dce), sizeof(raw));			\
 									\
 	if (dce->flags & KSMBD_DCERPC_LITTLE_ENDIAN)			\
-		ret = le(*(type *)PAYLOAD_HEAD(dce));			\
+		ret = le(raw);						\
 	else								\
-		ret = be(*(type *)PAYLOAD_HEAD(dce));			\
+		ret = be(raw);						\
 	dce->offset += sizeof(type);					\
 	if (value)							\
 		*value = ret;						\
@@ -820,6 +825,10 @@ static int dcerpc_hdr_write(struct ksmbd_dcerpc *dce,
 static int dcerpc_hdr_read(struct ksmbd_dcerpc *dce,
 			   struct dcerpc_header *hdr)
 {
+	__u16 frag_length;
+	__u16 auth_length;
+	__u32 call_id;
+
 	/* Common Type Header for the Serialization Stream */
 
 	if (ndr_read_int8(dce, &hdr->rpc_vers))
@@ -849,12 +858,15 @@ static int dcerpc_hdr_read(struct ksmbd_dcerpc *dce,
 	if (hdr->packed_drep[0] != DCERPC_SERIALIZATION_LITTLE_ENDIAN)
 		dce->flags &= ~KSMBD_DCERPC_LITTLE_ENDIAN;
 
-	if (ndr_read_int16(dce, &hdr->frag_length))
+	if (ndr_read_int16(dce, &frag_length))
 		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->auth_length))
+	if (ndr_read_int16(dce, &auth_length))
 		return -EINVAL;
-	if (ndr_read_int32(dce, &hdr->call_id))
+	if (ndr_read_int32(dce, &call_id))
 		return -EINVAL;
+	hdr->frag_length = frag_length;
+	hdr->auth_length = auth_length;
+	hdr->call_id = call_id;
 	return 0;
 }
 
@@ -883,12 +895,19 @@ static int dcerpc_response_hdr_write(struct ksmbd_dcerpc *dce,
 static int dcerpc_request_hdr_read(struct ksmbd_dcerpc *dce,
 				   struct dcerpc_request_header *hdr)
 {
-	if (ndr_read_int32(dce, &hdr->alloc_hint))
+	__u32 alloc_hint;
+	__u16 context_id;
+	__u16 opnum;
+
+	if (ndr_read_int32(dce, &alloc_hint))
 		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->context_id))
+	if (ndr_read_int16(dce, &context_id))
 		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->opnum))
+	if (ndr_read_int16(dce, &opnum))
 		return -EINVAL;
+	hdr->alloc_hint = alloc_hint;
+	hdr->context_id = context_id;
+	hdr->opnum = opnum;
 	return 0;
 }
 

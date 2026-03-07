@@ -56,7 +56,9 @@ test(
   args: files('test_integration.sh'),
   env: [
     'BUILDDIR=' + meson.project_build_root(),
+    'KSMBDCTL=' + ksmbdctl_exe.full_path(),
   ],
+  depends: ksmbdctl_exe,
   timeout: 240,
 )
 

@@ -1060,19 +1060,19 @@ static int verify_mountd_pid(pid_t pid)
 	fp = fopen(path, "r");
 	if (!fp)
 		return 0;
-		if (fgets(comm, sizeof(comm), fp)) {
-			size_t len = strlen(comm);
+	if (fgets(comm, sizeof(comm), fp)) {
+		size_t len = strlen(comm);
 
-			if (len > 0 && comm[len - 1] == '\n')
-				comm[len - 1] = '\0';
-			/*
-			 * Unified CLI mode runs mountd via `ksmbdctl start`,
-			 * so the process comm can be "ksmbdctl".
-			 */
-			if (!strcmp(comm, "ksmbd.mountd") ||
-			    !strcmp(comm, "ksmbdctl"))
-				ret = 1;
-		}
+		if (len > 0 && comm[len - 1] == '\n')
+			comm[len - 1] = '\0';
+		/*
+		 * Unified CLI mode runs mountd via `ksmbdctl start`,
+		 * so the process comm can be "ksmbdctl".
+		 */
+		if (!strcmp(comm, "ksmbd.mountd") ||
+		    !strcmp(comm, "ksmbdctl"))
+			ret = 1;
+	}
 	fclose(fp);
 	return ret;
 }

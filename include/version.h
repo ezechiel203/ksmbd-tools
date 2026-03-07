@@ -6,6 +6,6 @@
 #ifndef __KSMBD_VERSION_H__
 #define __KSMBD_VERSION_H__
 
-#define KSMBD_TOOLS_VERSION "3.5.6"
+#define KSMBD_TOOLS_VERSION "4.2.12"
 
 #endif /* __KSMBD_VERSION_H__ */

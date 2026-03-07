@@ -943,6 +943,7 @@ static int match_host_cidr(const char *pattern, const char *addr)
 	const char *slash;
 	char network_str[INET6_ADDRSTRLEN + 1];
 	int prefix_len;
+	char *endp;
 	size_t net_len;
 	int af;
 	unsigned char net_addr[sizeof(struct in6_addr)];
@@ -963,8 +964,9 @@ static int match_host_cidr(const char *pattern, const char *addr)
 	memcpy(network_str, pattern, net_len);
 	network_str[net_len] = '\0';
 
-	prefix_len = atoi(slash + 1);
-	if (prefix_len < 0)
+	errno = 0;
+	prefix_len = strtol(slash + 1, &endp, 10);
+	if (errno || endp == slash + 1 || *endp != '\0' || prefix_len < 0)
 		return !strcmp(pattern, addr);
 
 	/* Determine address family */

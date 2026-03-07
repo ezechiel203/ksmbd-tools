@@ -351,6 +351,10 @@ static struct nla_policy ksmbd_nl_policy[__KSMBD_EVENT_MAX] = {
 	[KSMBD_EVENT_LOGIN_RESPONSE_EXT] = {
 		.minlen = sizeof(struct ksmbd_login_response_ext),
 	},
+
+	[KSMBD_EVENT_SHARE_CONFIG_FLUSH] = {
+		.minlen = 0,
+	},
 };
 
 static struct genl_cmd ksmbd_genl_cmds[] = {
@@ -458,6 +462,12 @@ static struct genl_cmd ksmbd_genl_cmds[] = {
 	},
 	{
 		.c_id		= KSMBD_EVENT_LOGIN_RESPONSE_EXT,
+		.c_attr_policy	= ksmbd_nl_policy,
+		.c_msg_parser	= &handle_unsupported_event,
+		.c_maxattr	= KSMBD_EVENT_MAX,
+	},
+	{
+		.c_id		= KSMBD_EVENT_SHARE_CONFIG_FLUSH,
 		.c_attr_policy	= ksmbd_nl_policy,
 		.c_msg_parser	= &handle_unsupported_event,
 		.c_maxattr	= KSMBD_EVENT_MAX,

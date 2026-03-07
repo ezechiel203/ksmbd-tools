@@ -62,9 +62,12 @@ echo "=== ksmbd-tools Integration Tests ==="
 echo ""
 
 # Find the ksmbdctl binary
-KSMBDCTL="$BUILDDIR/tools/ksmbdctl"
+KSMBDCTL="${KSMBDCTL:-$BUILDDIR/ksmbdctl}"
+if [ ! -x "$KSMBDCTL" ] && [ -x "$BUILDDIR/tools/ksmbdctl" ]; then
+    KSMBDCTL="$BUILDDIR/tools/ksmbdctl"
+fi
 if [ ! -x "$KSMBDCTL" ]; then
-    echo "ERROR: Cannot find $KSMBDCTL - build first"
+    echo "ERROR: Cannot find ksmbdctl under $BUILDDIR - build first"
     exit 1
 fi
 

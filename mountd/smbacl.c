@@ -43,9 +43,13 @@ int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid)
 	for (i = 0; i < NUM_AUTHS; ++i)
 		if (ndr_read_int8(dce, &sid->authority[i]))
 			return -EINVAL;
-	for (i = 0; i < sid->num_subauth; ++i)
-		if (ndr_read_int32(dce, &sid->sub_auth[i]))
+	for (i = 0; i < sid->num_subauth; ++i) {
+		__u32 sub_auth;
+
+		if (ndr_read_int32(dce, &sub_auth))
 			return -EINVAL;
+		sid->sub_auth[i] = sub_auth;
+	}
 	return 0;
 }
 

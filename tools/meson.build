@@ -32,7 +32,7 @@ tools_lib = static_library(
   ],
 )
 
-executable(
+ksmbdctl_exe = executable(
   'ksmbdctl',
   'main.c',
   include_directories: include_dirs,
