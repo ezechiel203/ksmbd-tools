@@ -72,6 +72,9 @@ struct smbconf_global {
 	unsigned int		tcp_send_timeout;
 	unsigned int		quic_recv_timeout;
 	unsigned int		quic_send_timeout;
+	bool			quic_handshake_delegate;
+	char			*quic_tls_cert;
+	char			*quic_tls_key;
 	unsigned int		max_lock_count;
 	unsigned int		max_buffer_size;
 	unsigned int		session_timeout;

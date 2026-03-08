@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+
+#include <stdbool.h>
 /*
  *   Copyright (C) 2018 Samsung Electronics Co., Ltd.
  *
@@ -298,6 +300,7 @@ struct ksmbd_dcerpc {
 
 struct ksmbd_rpc_pipe {
 	unsigned int		id;
+	bool			ioctl_reply_consumed;
 
 	int			num_entries;
 	int			num_processed;
@@ -356,6 +359,9 @@ void rpc_destroy(void);
 int rpc_restricted_context(struct ksmbd_rpc_command *req);
 
 int rpc_ioctl_request(struct ksmbd_rpc_command *req,
+		      struct ksmbd_rpc_command *resp,
+		      int max_resp_sz);
+int rpc_state_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp,
 		      int max_resp_sz);
 int rpc_read_request(struct ksmbd_rpc_command *req,

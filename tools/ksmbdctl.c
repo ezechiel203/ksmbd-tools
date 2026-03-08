@@ -125,6 +125,16 @@ static int notify_mountd(void)
  */
 static int cmd_start(int argc, char **argv)
 {
+	if (opt_smbconf) {
+		g_free(global_conf.smbconf);
+		global_conf.smbconf = g_strdup(opt_smbconf);
+	}
+
+	if (opt_pwddb) {
+		g_free(global_conf.pwddb);
+		global_conf.pwddb = g_strdup(opt_pwddb);
+	}
+
 	tool_main = mountd_main;
 	return mountd_main(argc, argv);
 }

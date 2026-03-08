@@ -19,6 +19,7 @@ include_dirs = include_directories(
   'addshare',
   'adduser',
   'control',
+  'third_party/picotls/include',
 )
 
 glib_dep = dependency(
@@ -28,6 +29,10 @@ glib_dep = dependency(
 libnl_dep = dependency(
   'libnl-genl-3.0',
   version: '>= 3.0',
+)
+openssl_dep = dependency(
+  'openssl',
+  required: true,
 )
 
 # systemd support (sd_notify + unit file) — respects -Dsystemd=disabled
@@ -61,6 +66,13 @@ cc = meson.get_compiler('c')
 
 pthread_lib = cc.find_library(
   'pthread',
+)
+
+picotls_sources = files(
+  'third_party/picotls/lib/hpke.c',
+  'third_party/picotls/lib/picotls.c',
+  'third_party/picotls/lib/openssl.c',
+  'third_party/picotls/lib/pembase64.c',
 )
 
 if krb5_dep.found()

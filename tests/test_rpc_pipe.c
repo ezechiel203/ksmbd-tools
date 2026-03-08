@@ -2171,6 +2171,228 @@ static void test_rpc_read_after_open_no_write(void)
 	destroy_subsystems();
 }
 
+static void test_rpc_state_ready_after_bind_write(void)
+{
+	struct ksmbd_rpc_command *req, *resp, *state_resp;
+	struct ksmbd_rpc_pipe_info *info;
+	int ret;
+	size_t bind_len;
+
+	init_subsystems();
+
+	req = g_malloc0(sizeof(*req) + 512);
+	resp = g_malloc0(sizeof(*resp) + 4096);
+	state_resp = g_malloc0(sizeof(*state_resp) +
+			       sizeof(struct ksmbd_rpc_pipe_info));
+
+	req->handle = PIPE_HANDLE_BASE + 300;
+	req->flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	req->payload_sz = 256;
+	ret = rpc_open_request(req, resp);
+	assert(ret == KSMBD_RPC_OK);
+
+	bind_len = build_srvsvc_bind((char *)req->payload, 512);
+	req->payload_sz = bind_len;
+	ret = rpc_write_request(req, resp);
+	assert(ret == KSMBD_RPC_OK);
+
+	req->flags = KSMBD_RPC_QUERY_METHOD | KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	ret = rpc_state_request(req, state_resp,
+				sizeof(*state_resp) +
+				sizeof(struct ksmbd_rpc_pipe_info));
+	assert(ret == KSMBD_RPC_OK);
+	assert(state_resp->payload_sz == sizeof(struct ksmbd_rpc_pipe_info));
+
+	info = (struct ksmbd_rpc_pipe_info *)state_resp->payload;
+	assert(info->pipe_state == 3);
+	assert(info->number_of_messages == 1);
+	assert(info->read_data_available != 0);
+	assert(info->message_length == info->read_data_available);
+
+	close_pipe(PIPE_HANDLE_BASE + 300);
+	g_free(req);
+	g_free(resp);
+	g_free(state_resp);
+	destroy_subsystems();
+}
+
+static void test_rpc_state_empty_after_read(void)
+{
+	struct ksmbd_rpc_command *req, *resp, *state_resp;
+	struct ksmbd_rpc_pipe_info *info;
+	int ret;
+	size_t bind_len;
+
+	init_subsystems();
+
+	req = g_malloc0(sizeof(*req) + 512);
+	resp = g_malloc0(sizeof(*resp) + 4096);
+	state_resp = g_malloc0(sizeof(*state_resp) +
+			       sizeof(struct ksmbd_rpc_pipe_info));
+
+	req->handle = PIPE_HANDLE_BASE + 301;
+	req->flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	req->payload_sz = 256;
+	ret = rpc_open_request(req, resp);
+	assert(ret == KSMBD_RPC_OK);
+
+	bind_len = build_srvsvc_bind((char *)req->payload, 512);
+	req->payload_sz = bind_len;
+	ret = rpc_write_request(req, resp);
+	assert(ret == KSMBD_RPC_OK);
+
+	req->flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE | KSMBD_RPC_READ_METHOD;
+	ret = rpc_read_request(req, resp, 4096);
+	assert(ret == KSMBD_RPC_OK);
+
+	req->flags = KSMBD_RPC_QUERY_METHOD | KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	ret = rpc_state_request(req, state_resp,
+				sizeof(*state_resp) +
+				sizeof(struct ksmbd_rpc_pipe_info));
+	assert(ret == KSMBD_RPC_OK);
+
+	info = (struct ksmbd_rpc_pipe_info *)state_resp->payload;
+	assert(info->pipe_state == 3);
+	assert(info->number_of_messages == 0);
+	assert(info->read_data_available == 0);
+	assert(info->message_length == 0);
+
+	close_pipe(PIPE_HANDLE_BASE + 301);
+	g_free(req);
+	g_free(resp);
+	g_free(state_resp);
+	destroy_subsystems();
+}
+
+static void test_rpc_state_empty_after_ioctl_roundtrip(void)
+{
+	struct ksmbd_rpc_command *req, *resp, *state_resp, *read_resp;
+	struct ksmbd_rpc_pipe_info *info;
+	int ret;
+	size_t bind_len;
+
+	init_subsystems();
+
+	req = g_malloc0(sizeof(*req) + 512);
+	resp = g_malloc0(sizeof(*resp) + 4096);
+	state_resp = g_malloc0(sizeof(*state_resp) +
+			       sizeof(struct ksmbd_rpc_pipe_info));
+	read_resp = g_malloc0(sizeof(*read_resp) + 4096);
+
+	req->handle = PIPE_HANDLE_BASE + 302;
+	req->flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	req->payload_sz = 256;
+	ret = rpc_open_request(req, resp);
+	assert(ret == KSMBD_RPC_OK);
+
+	bind_len = build_srvsvc_bind((char *)req->payload, 512);
+	req->payload_sz = bind_len;
+	req->flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE | KSMBD_RPC_IOCTL_METHOD;
+	ret = rpc_ioctl_request(req, resp, 4096);
+	assert(ret == KSMBD_RPC_OK);
+	assert(resp->payload_sz != 0);
+
+	req->flags = KSMBD_RPC_QUERY_METHOD | KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	ret = rpc_state_request(req, state_resp,
+				sizeof(*state_resp) +
+				sizeof(struct ksmbd_rpc_pipe_info));
+	assert(ret == KSMBD_RPC_OK);
+
+	info = (struct ksmbd_rpc_pipe_info *)state_resp->payload;
+	assert(info->pipe_state == 3);
+	assert(info->number_of_messages == 0);
+	assert(info->read_data_available == 0);
+	assert(info->message_length == 0);
+
+	req->flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE | KSMBD_RPC_READ_METHOD;
+	ret = rpc_read_request(req, read_resp, 4096);
+	assert(ret == KSMBD_RPC_OK);
+	assert(read_resp->payload_sz == 0);
+
+	close_pipe(PIPE_HANDLE_BASE + 302);
+	g_free(req);
+	g_free(resp);
+	g_free(state_resp);
+	g_free(read_resp);
+	destroy_subsystems();
+}
+
+static const unsigned char samba_lsarpc_bind_blob[] = {
+	0x05, 0x00, 0x0b, 0x03, 0x10, 0x00, 0x00, 0x00,
+	0xa0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+	0xb8, 0x10, 0xb8, 0x10, 0x00, 0x00, 0x00, 0x00,
+	0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+	0x78, 0x57, 0x34, 0x12, 0x34, 0x12, 0xcd, 0xab,
+	0xef, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+	0x00, 0x00, 0x00, 0x00, 0x04, 0x5d, 0x88, 0x8a,
+	0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00,
+	0x2b, 0x10, 0x48, 0x60, 0x02, 0x00, 0x00, 0x00,
+	0x01, 0x00, 0x01, 0x00, 0x78, 0x57, 0x34, 0x12,
+	0x34, 0x12, 0xcd, 0xab, 0xef, 0x00, 0x01, 0x23,
+	0x45, 0x67, 0x89, 0xab, 0x00, 0x00, 0x00, 0x00,
+	0x33, 0x05, 0x71, 0x71, 0xba, 0xbe, 0x37, 0x49,
+	0x83, 0x19, 0xb5, 0xdb, 0xef, 0x9c, 0xcc, 0x36,
+	0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00,
+	0x78, 0x57, 0x34, 0x12, 0x34, 0x12, 0xcd, 0xab,
+	0xef, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+	0x00, 0x00, 0x00, 0x00, 0x2c, 0x1c, 0xb7, 0x6c,
+	0x12, 0x98, 0x40, 0x45, 0x03, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00
+};
+
+static void test_rpc_state_empty_after_samba_lsarpc_ioctl_roundtrip(void)
+{
+	struct ksmbd_rpc_command *req, *resp, *state_resp, *read_resp;
+	struct ksmbd_rpc_pipe_info *info;
+	int ret;
+
+	init_subsystems();
+
+	req = g_malloc0(sizeof(*req) + sizeof(samba_lsarpc_bind_blob));
+	resp = g_malloc0(sizeof(*resp) + 4096);
+	state_resp = g_malloc0(sizeof(*state_resp) +
+			       sizeof(struct ksmbd_rpc_pipe_info));
+	read_resp = g_malloc0(sizeof(*read_resp) + 4096);
+
+	req->handle = PIPE_HANDLE_BASE + 303;
+	req->flags = KSMBD_RPC_LSARPC_METHOD_INVOKE;
+	req->payload_sz = 256;
+	ret = rpc_open_request(req, resp);
+	assert(ret == KSMBD_RPC_OK);
+
+	memcpy(req->payload, samba_lsarpc_bind_blob,
+	       sizeof(samba_lsarpc_bind_blob));
+	req->payload_sz = sizeof(samba_lsarpc_bind_blob);
+	req->flags = KSMBD_RPC_LSARPC_METHOD_INVOKE | KSMBD_RPC_IOCTL_METHOD;
+	ret = rpc_ioctl_request(req, resp, 4096);
+	assert(ret == KSMBD_RPC_OK);
+	assert(resp->payload_sz != 0);
+
+	req->flags = KSMBD_RPC_QUERY_METHOD | KSMBD_RPC_LSARPC_METHOD_INVOKE;
+	ret = rpc_state_request(req, state_resp,
+				sizeof(*state_resp) +
+				sizeof(struct ksmbd_rpc_pipe_info));
+	assert(ret == KSMBD_RPC_OK);
+
+	info = (struct ksmbd_rpc_pipe_info *)state_resp->payload;
+	assert(info->pipe_state == 3);
+	assert(info->number_of_messages == 0);
+	assert(info->read_data_available == 0);
+	assert(info->message_length == 0);
+
+	req->flags = KSMBD_RPC_LSARPC_METHOD_INVOKE | KSMBD_RPC_READ_METHOD;
+	ret = rpc_read_request(req, read_resp, 4096);
+	assert(ret == KSMBD_RPC_OK);
+	assert(read_resp->payload_sz == 0);
+
+	close_pipe(PIPE_HANDLE_BASE + 303);
+	g_free(req);
+	g_free(resp);
+	g_free(state_resp);
+	g_free(read_resp);
+	destroy_subsystems();
+}
+
 /* ============================================================
  * SECTION 33: Write + read request dispatch for each service
  * ============================================================ */
@@ -2308,6 +2530,10 @@ int main(void)
 
 	printf("\n--- rpc_read after open (no write) ---\n");
 	TEST(test_rpc_read_after_open_no_write);
+	TEST(test_rpc_state_ready_after_bind_write);
+	TEST(test_rpc_state_empty_after_read);
+	TEST(test_rpc_state_empty_after_ioctl_roundtrip);
+	TEST(test_rpc_state_empty_after_samba_lsarpc_ioctl_roundtrip);
 
 	printf("\n--- ndr_write_array_of_structs empty ---\n");
 	TEST(test_ndr_write_array_of_structs_empty);

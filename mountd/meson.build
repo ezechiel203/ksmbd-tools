@@ -2,6 +2,7 @@ mountd_lib = static_library(
   'mountd',
   'worker.c',
   'ipc.c',
+  'quic_picotls.c',
   'rpc.c',
   'rpc_srvsvc.c',
   'rpc_wkssvc.c',
@@ -9,6 +10,7 @@ mountd_lib = static_library(
   'smbacl.c',
   'rpc_samr.c',
   'rpc_lsarpc.c',
+  picotls_sources,
   include_directories: include_dirs,
   c_args: [
     '-DSYSCONFDIR="@0@"'.format(get_option('prefix') / get_option('sysconfdir')),
@@ -18,5 +20,6 @@ mountd_lib = static_library(
     glib_dep,
     libnl_dep,
     libsystemd_dep,
+    openssl_dep,
   ],
 )

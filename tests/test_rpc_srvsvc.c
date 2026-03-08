@@ -660,6 +660,41 @@ static void test_srvsvc_share_enum_all_level1_with_ipc(void)
 }
 
 /*
+ * NetShareEnumAll level 2 with IPC$ share.
+ */
+static void test_srvsvc_share_enum_all_level2_with_ipc(void)
+{
+	struct ksmbd_rpc_command *resp;
+	struct smbconf_group grp;
+	char pdu[512];
+	size_t pdu_len;
+	int ret;
+
+	init_subsystems();
+
+	grp = make_share_group("IPC$", "/tmp/ipc");
+	ret = shm_add_new_share(&grp);
+	assert(ret == 0);
+	free_share_group(&grp);
+
+	do_srvsvc_bind();
+
+	pdu_len = build_srvsvc_share_enum_all(pdu, sizeof(pdu), 2);
+	resp = do_srvsvc_ioctl(pdu, pdu_len, 0, &ret);
+	assert(ret == KSMBD_RPC_OK);
+	assert(resp->payload_sz > 0);
+	assert(resp->payload[2] == DCERPC_PTYPE_RPC_RESPONSE);
+
+	assert(resp->payload_sz > sizeof(struct dcerpc_header) +
+				  sizeof(struct dcerpc_response_header));
+
+	g_free(resp);
+
+	close_srvsvc_pipe();
+	destroy_subsystems();
+}
+
+/*
  * NetShareGetInfo level 0 for IPC$ share.
  */
 static void test_srvsvc_share_get_info_level0(void)
@@ -712,6 +747,38 @@ static void test_srvsvc_share_get_info_level1(void)
 	do_srvsvc_bind();
 
 	pdu_len = build_srvsvc_share_get_info(pdu, sizeof(pdu), "IPC$", 1);
+	resp = do_srvsvc_ioctl(pdu, pdu_len, 0, &ret);
+	assert(ret == KSMBD_RPC_OK);
+	assert(resp->payload_sz > 0);
+	assert(resp->payload[2] == DCERPC_PTYPE_RPC_RESPONSE);
+
+	g_free(resp);
+
+	close_srvsvc_pipe();
+	destroy_subsystems();
+}
+
+/*
+ * NetShareGetInfo level 2 for IPC$ share.
+ */
+static void test_srvsvc_share_get_info_level2(void)
+{
+	struct ksmbd_rpc_command *resp;
+	struct smbconf_group grp;
+	char pdu[512];
+	size_t pdu_len;
+	int ret;
+
+	init_subsystems();
+
+	grp = make_share_group("IPC$", "/tmp/ipc");
+	ret = shm_add_new_share(&grp);
+	assert(ret == 0);
+	free_share_group(&grp);
+
+	do_srvsvc_bind();
+
+	pdu_len = build_srvsvc_share_get_info(pdu, sizeof(pdu), "IPC$", 2);
 	resp = do_srvsvc_ioctl(pdu, pdu_len, 0, &ret);
 	assert(ret == KSMBD_RPC_OK);
 	assert(resp->payload_sz > 0);
@@ -890,7 +957,7 @@ static void test_srvsvc_share_enum_level0_no_shares(void)
 }
 
 /*
- * NetShareEnumAll with unsupported level (e.g. 2).
+ * NetShareEnumAll with unsupported level (e.g. 501).
  * srvsvc_share_info_return falls through to rpc_pipe_reset() and
  * the status remains KSMBD_RPC_ENOTIMPLEMENTED (from the initial
  * setting). The ioctl wrapper still returns KSMBD_RPC_OK but the
@@ -915,9 +982,9 @@ static void test_srvsvc_share_enum_unsupported_level(void)
 
 	do_srvsvc_bind();
 
-	/* Level 2 is not implemented - this exercises the "else" branch
+	/* Level 501 is not implemented - this exercises the "else" branch
 	 * in srvsvc_share_info_return() where rpc_pipe_reset is called */
-	pdu_len = build_srvsvc_share_enum_all(pdu, sizeof(pdu), 2);
+	pdu_len = build_srvsvc_share_enum_all(pdu, sizeof(pdu), 501);
 	resp = do_srvsvc_ioctl(pdu, pdu_len, 0, &ret);
 	assert(ret == KSMBD_RPC_OK);
 	assert(resp->payload_sz > 0);
@@ -1729,10 +1796,12 @@ int main(void)
 	printf("\n--- NetShareEnumAll (expanded) ---\n");
 	TEST(test_srvsvc_share_enum_all_level0_with_ipc);
 	TEST(test_srvsvc_share_enum_all_level1_with_ipc);
+	TEST(test_srvsvc_share_enum_all_level2_with_ipc);
 
 	printf("\n--- NetShareGetInfo ---\n");
 	TEST(test_srvsvc_share_get_info_level0);
 	TEST(test_srvsvc_share_get_info_level1);
+	TEST(test_srvsvc_share_get_info_level2);
 	TEST(test_srvsvc_share_get_info_nonexistent);
 
 	printf("\n--- Restricted Context ---\n");

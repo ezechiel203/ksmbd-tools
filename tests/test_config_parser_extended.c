@@ -1125,6 +1125,7 @@ static void test_optional_server_limits(void)
 		"\ttcp send timeout = 60\n"
 		"\tquic recv timeout = 10\n"
 		"\tquic send timeout = 20\n"
+		"\tquic handshake delegate = yes\n"
 		"\tmax lock count = 500\n"
 		"\tmax buffer size = 64K\n"
 		"\tsession timeout = 300\n"
@@ -1141,6 +1142,7 @@ static void test_optional_server_limits(void)
 	assert(global_conf.tcp_send_timeout == 60);
 	assert(global_conf.quic_recv_timeout == 10);
 	assert(global_conf.quic_send_timeout == 20);
+	assert(global_conf.quic_handshake_delegate == true);
 	assert(global_conf.max_lock_count == 500);
 	assert(global_conf.max_buffer_size == 64 * 1024);
 	assert(global_conf.session_timeout == 300);

@@ -108,6 +108,8 @@ static void cleanup_config(void)
 	g_free(global_conf.krb5_keytab_file);
 	g_free(global_conf.krb5_service_name);
 	g_free(global_conf.fruit_model);
+	g_free(global_conf.quic_tls_cert);
+	g_free(global_conf.quic_tls_key);
 	g_strfreev(global_conf.interfaces);
 	memset(&global_conf, 0, sizeof(global_conf));
 }
@@ -233,6 +235,27 @@ static void test_default_values(void)
 
 	/* Default max ip connections = 32 */
 	assert(global_conf.max_ip_connections == 32);
+
+	cleanup_config();
+}
+
+static void test_quic_tls_paths(void)
+{
+	int ret;
+
+	ret = parse_config_string(
+		"[global]\n"
+		"quic handshake delegate = yes\n"
+		"quic tls cert = /tmp/ksmbd-quic-cert.pem\n"
+		"quic tls key = /tmp/ksmbd-quic-key.pem\n");
+	assert(ret == 0);
+	assert(global_conf.quic_handshake_delegate);
+	assert(global_conf.quic_tls_cert != NULL);
+	assert(global_conf.quic_tls_key != NULL);
+	assert(strcmp(global_conf.quic_tls_cert,
+		      "/tmp/ksmbd-quic-cert.pem") == 0);
+	assert(strcmp(global_conf.quic_tls_key,
+		      "/tmp/ksmbd-quic-key.pem") == 0);
 
 	cleanup_config();
 }
@@ -694,6 +717,7 @@ int main(void)
 	/* Full config parsing tests */
 	printf("\n--- Default Values ---\n");
 	TEST(test_default_values);
+	TEST(test_quic_tls_paths);
 
 	printf("\n--- Encryption Flags ---\n");
 	TEST(test_encryption_mandatory);

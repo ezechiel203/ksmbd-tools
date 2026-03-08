@@ -65,6 +65,24 @@ static int __share_entry_size_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 	return sz;
 }
 
+static int __share_entry_size_ctr2(struct ksmbd_dcerpc *dce, gpointer entry)
+{
+	struct ksmbd_share *share = entry;
+	int sz = 0;
+
+	sz = strlen(share->name) * 2;
+	if (share->comment)
+		sz += strlen(share->comment) * 2;
+	if (share->path)
+		sz += strlen(share->path) * 2;
+	/*
+	 * SHARE_INFO_2 adds four strings (netname, remark, path, passwd)
+	 * and four scalar fields (type, permissions, max_uses, current_uses).
+	 */
+	sz += 16 * sizeof(__u32);
+	return sz;
+}
+
 /*
  * Embedded Reference Pointers
  *
@@ -95,6 +113,48 @@ static int __share_entry_rep_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 	return ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
 }
 
+static int __share_entry_rep_ctr2(struct ksmbd_dcerpc *dce, gpointer entry)
+{
+	struct ksmbd_share *share = entry;
+	int ret;
+	__u32 max_uses;
+
+	dce->num_pointers++;
+	ret = ndr_write_int32(dce, dce->num_pointers); /* netname */
+	if (ret)
+		return ret;
+
+	ret = ndr_write_int32(dce, __share_type(share));
+	if (ret)
+		return ret;
+
+	dce->num_pointers++;
+	ret = ndr_write_int32(dce, dce->num_pointers); /* remark */
+	if (ret)
+		return ret;
+
+	ret = ndr_write_int32(dce, 0); /* permissions */
+	if (ret)
+		return ret;
+
+	max_uses = share->max_connections > 0 ? share->max_connections : 0xFFFFFFFF;
+	ret = ndr_write_int32(dce, max_uses);
+	if (ret)
+		return ret;
+
+	ret = ndr_write_int32(dce, share->num_connections);
+	if (ret)
+		return ret;
+
+	dce->num_pointers++;
+	ret = ndr_write_int32(dce, dce->num_pointers); /* path */
+	if (ret)
+		return ret;
+
+	dce->num_pointers++;
+	return ndr_write_int32(dce, dce->num_pointers); /* passwd */
+}
+
 static int __share_entry_data_ctr0(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	struct ksmbd_share *share = entry;
@@ -112,6 +172,26 @@ static int __share_entry_data_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 		return ret;
 
 	return ndr_write_vstring(dce, share->comment);
+}
+
+static int __share_entry_data_ctr2(struct ksmbd_dcerpc *dce, gpointer entry)
+{
+	struct ksmbd_share *share = entry;
+	int ret;
+
+	ret = ndr_write_vstring(dce, share->name);
+	if (ret)
+		return ret;
+
+	ret = ndr_write_vstring(dce, share->comment);
+	if (ret)
+		return ret;
+
+	ret = ndr_write_vstring(dce, share->path ? share->path : "");
+	if (ret)
+		return ret;
+
+	return ndr_write_vstring(dce, "");
 }
 
 static int __share_entry_null_rep_ctr0(struct ksmbd_dcerpc *dce,
@@ -136,6 +216,35 @@ static int __share_entry_null_rep_ctr1(struct ksmbd_dcerpc *dce,
 	ret = ndr_write_int32(dce, 0); /* ref pointer */
 
 	return ret;
+}
+
+static int __share_entry_null_rep_ctr2(struct ksmbd_dcerpc *dce,
+				       gpointer entry)
+{
+	int ret;
+
+	ret = ndr_write_int32(dce, 0); /* netname */
+	if (ret)
+		return ret;
+	ret = ndr_write_int32(dce, 0); /* type */
+	if (ret)
+		return ret;
+	ret = ndr_write_int32(dce, 0); /* remark */
+	if (ret)
+		return ret;
+	ret = ndr_write_int32(dce, 0); /* permissions */
+	if (ret)
+		return ret;
+	ret = ndr_write_int32(dce, 0); /* max_uses */
+	if (ret)
+		return ret;
+	ret = ndr_write_int32(dce, 0); /* current_uses */
+	if (ret)
+		return ret;
+	ret = ndr_write_int32(dce, 0); /* path */
+	if (ret)
+		return ret;
+	return ndr_write_int32(dce, 0); /* passwd */
 }
 
 static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
@@ -300,6 +409,8 @@ static int srvsvc_share_get_info_return(struct ksmbd_rpc_pipe *pipe)
 		dce->entry_rep = __share_entry_null_rep_ctr0;
 	} else if (dce->si_req.level == 1) {
 		dce->entry_rep = __share_entry_null_rep_ctr1;
+	} else if (dce->si_req.level == 2) {
+		dce->entry_rep = __share_entry_null_rep_ctr2;
 	} else {
 		pr_err("Unsupported share info level (read): %d\n",
 			dce->si_req.level);
@@ -427,6 +538,10 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 		dce->entry_size = __share_entry_size_ctr1;
 		dce->entry_rep = __share_entry_rep_ctr1;
 		dce->entry_data = __share_entry_data_ctr1;
+	} else if (dce->si_req.level == 2) {
+		dce->entry_size = __share_entry_size_ctr2;
+		dce->entry_rep = __share_entry_rep_ctr2;
+		dce->entry_data = __share_entry_data_ctr2;
 	} else {
 		pr_err("Unsupported share info level (write): %d\n",
 			dce->si_req.level);

@@ -359,6 +359,8 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 		ret = rpc_open_request(req, resp);
 	} else if (req->flags & KSMBD_RPC_CLOSE_METHOD) {
 		ret = rpc_close_request(req, resp);
+	} else if (req->flags & KSMBD_RPC_QUERY_METHOD) {
+		ret = rpc_state_request(req, resp, resp_msg->sz);
 	} else if (req->flags & KSMBD_RPC_IOCTL_METHOD) {
 		ret = rpc_ioctl_request(req, resp, resp_msg->sz);
 	} else if (req->flags & KSMBD_RPC_WRITE_METHOD) {
@@ -372,6 +374,7 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 
 	resp_msg->type = KSMBD_EVENT_RPC_RESPONSE;
 	resp->handle = req->handle;
+	resp->xid = req->xid;
 	resp->flags = ret;
 	resp_msg->sz = sizeof(struct ksmbd_rpc_command) + resp->payload_sz;
 

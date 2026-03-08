@@ -471,6 +471,14 @@ int control_limits(char *pwddb, char *smbconf)
 	printf("    %-28s%u%s\n", "QUIC Send Timeout:",
 	       global_conf.quic_send_timeout ? global_conf.quic_send_timeout : 5,
 	       " s (0=default:5)");
+	printf("    %-28s%s\n", "QUIC Handshake Delegate:",
+	       global_conf.quic_handshake_delegate ? "enabled" : "disabled");
+	printf("    %-28s%s\n", "QUIC TLS Certificate:",
+	       global_conf.quic_tls_cert ? global_conf.quic_tls_cert :
+					   "(not configured)");
+	printf("    %-28s%s\n", "QUIC TLS Key:",
+	       global_conf.quic_tls_key ? global_conf.quic_tls_key :
+					  "(not configured)");
 	printf("    %-28s%u\n", "SMBD Max IO Size:",
 	       global_conf.smbd_max_io_size ? global_conf.smbd_max_io_size :
 					      8388608);

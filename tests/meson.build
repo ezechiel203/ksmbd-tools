@@ -310,6 +310,16 @@ test_rpc_pipe = executable(
 )
 test('rpc-pipe', test_rpc_pipe)
 
+test_quic_picotls = executable(
+  'test_quic_picotls',
+  'test_quic_picotls.c',
+  include_directories: include_dirs,
+  c_args: test_c_args,
+  dependencies: test_deps,
+  link_with: test_link_all,
+)
+test('quic-picotls', test_quic_picotls)
+
 # --- SPNEGO / Kerberos / mountd tests (requires krb5 for OID symbols) ---
 if krb5_dep.found()
   test_spnego = executable(

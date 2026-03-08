@@ -19,15 +19,20 @@
 #include <netlink/genl/mngt.h>
 
 #include <linux/ksmbd_server.h>
+#include <linux/ksmbd_quic.h>
 
 #include <tools.h>
 #include <ipc.h>
+#include <quic_picotls.h>
 #include <worker.h>
 #include <config_parser.h>
 #include <management/user.h>
 #include <management/share.h>
 
 static struct nl_sock *sk;
+static struct nl_sock *quic_sk;
+static bool quic_registered;
+static struct genl_ops quic_family_ops;
 
 struct ksmbd_ipc_msg *ipc_msg_alloc(size_t sz)
 {
@@ -115,6 +120,26 @@ static int nlink_msg_cb(struct nl_msg *msg, void *arg)
 	return ret;
 }
 
+static int quic_nlink_msg_cb(struct nl_msg *msg, void *arg)
+{
+	struct genlmsghdr *gnlh = genlmsg_hdr(nlmsg_hdr(msg));
+	int ret;
+
+	if (gnlh->version != KSMBD_QUIC_GENL_VERSION) {
+		pr_err("QUIC IPC message version mismatch: %d\n", gnlh->version);
+		return NL_SKIP;
+	}
+
+	ret = genl_handle_msg(msg, NULL);
+	if (ret == -NLE_RANGE) {
+		pr_err("Unsupported QUIC IPC command id %u (version %u), skip\n",
+		       gnlh->cmd, gnlh->version);
+		return NL_SKIP;
+	}
+
+	return ret;
+}
+
 static int handle_unsupported_event(struct nl_cache_ops *unused,
 				    struct genl_cmd *cmd,
 				    struct genl_info *info,
@@ -122,6 +147,85 @@ static int handle_unsupported_event(struct nl_cache_ops *unused,
 {
 	pr_err("Unsupported IPC event %d, ignore\n", cmd->c_id);
 	return NL_SKIP;
+}
+
+static int quic_handshake_send_rsp(const struct ksmbd_quic_handshake_rsp *rsp)
+{
+	struct nl_msg *nlmsg;
+	struct nlmsghdr *hdr;
+	int ret = -EINVAL;
+
+	nlmsg = nlmsg_alloc();
+	if (!nlmsg)
+		return -ENOMEM;
+
+	nlmsg_set_proto(nlmsg, NETLINK_GENERIC);
+	hdr = genlmsg_put(nlmsg, getpid(), 0, quic_family_ops.o_id, 0, 0,
+			  KSMBD_QUIC_CMD_HANDSHAKE_RSP,
+			  KSMBD_QUIC_GENL_VERSION);
+	if (!hdr) {
+		pr_err("QUIC genlmsg_put() failed\n");
+		goto out;
+	}
+
+	ret = nla_put(nlmsg, KSMBD_QUIC_ATTR_PAYLOAD, sizeof(*rsp), rsp);
+	if (ret) {
+		pr_err("QUIC nla_put() failed: %d\n", ret);
+		goto out;
+	}
+
+	nl_complete_msg(quic_sk, nlmsg);
+	ret = nl_send_auto(quic_sk, nlmsg);
+	if (ret > 0)
+		ret = 0;
+	else
+		pr_err("QUIC nl_send_auto() failed: %d\n", ret);
+
+out:
+	nlmsg_free(nlmsg);
+	return ret;
+}
+
+static int quic_handshake_failure_rsp(const struct ksmbd_quic_handshake_req *req)
+{
+	struct ksmbd_quic_handshake_rsp rsp = {
+		.handle = req->handle,
+		.conn_id = req->conn_id,
+		.success = 0,
+		.cipher = KSMBD_QUIC_CIPHER_AES128GCM,
+	};
+
+	return quic_handshake_send_rsp(&rsp);
+}
+
+static int handle_quic_handshake_req(struct nl_cache_ops *unused,
+				     struct genl_cmd *cmd,
+				     struct genl_info *info,
+				     void *arg)
+{
+	struct nlattr *attr;
+	struct ksmbd_quic_handshake_req *req;
+	struct ksmbd_quic_handshake_rsp rsp;
+	int ret;
+
+	attr = info->attrs[KSMBD_QUIC_ATTR_PAYLOAD];
+	if (!attr)
+		return -EINVAL;
+	if (nla_len(attr) < (int)sizeof(*req))
+		return -EINVAL;
+
+	req = nla_data(attr);
+	if (req->client_hello_len > KSMBD_QUIC_MAX_CLIENT_HELLO)
+		return -EINVAL;
+
+	ret = ksmbd_quic_build_handshake_rsp(req, &rsp);
+	if (ret) {
+		pr_err("QUIC handshake build failed for handle=%u conn=%" G_GINT64_MODIFIER "x: %d\n",
+		       req->handle, GUINT64_FROM_BE((guint64)req->conn_id), ret);
+		return quic_handshake_failure_rsp(req);
+	}
+
+	return quic_handshake_send_rsp(&rsp);
 }
 
 static int ifc_list_size(void)
@@ -256,13 +360,19 @@ out:
 
 int ipc_process_event(void)
 {
-	struct pollfd pfd;
+	struct pollfd pfds[2];
+	int nfds = 1;
 	int ret;
 
-	pfd.fd = nl_socket_get_fd(sk);
-	pfd.events = POLLIN;
+	pfds[0].fd = nl_socket_get_fd(sk);
+	pfds[0].events = POLLIN;
+	if (quic_sk) {
+		pfds[1].fd = nl_socket_get_fd(quic_sk);
+		pfds[1].events = POLLIN;
+		nfds = 2;
+	}
 
-	ret = poll(&pfd, 1, -1);
+	ret = poll(pfds, nfds, -1);
 	if (ret < 0) {
 		if (errno != EINTR) {
 			ret = -errno;
@@ -272,11 +382,25 @@ int ipc_process_event(void)
 		return 0;
 	}
 
-	ret = nl_recvmsgs_default(sk);
-	if (ret < 0)
-		pr_err("nl_recv() failed, check dmesg, error: %s\n",
-		       nl_geterror(ret));
-	return ret;
+	if (pfds[0].revents & POLLIN) {
+		ret = nl_recvmsgs_default(sk);
+		if (ret < 0) {
+			pr_err("nl_recv() failed, check dmesg, error: %s\n",
+			       nl_geterror(ret));
+			return ret;
+		}
+	}
+
+	if (quic_sk && (pfds[1].revents & POLLIN)) {
+		ret = nl_recvmsgs_default(quic_sk);
+		if (ret < 0) {
+			pr_err("QUIC nl_recv() failed, error: %s\n",
+			       nl_geterror(ret));
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
 static struct nla_policy ksmbd_nl_policy[__KSMBD_EVENT_MAX] = {
@@ -480,6 +604,50 @@ static struct genl_ops ksmbd_family_ops = {
 	.o_ncmds = ARRAY_SIZE(ksmbd_genl_cmds),
 };
 
+static struct nla_policy quic_nl_policy[KSMBD_QUIC_ATTR_MAX + 1] = {
+	[KSMBD_QUIC_ATTR_PAYLOAD] = {
+		.type = NLA_BINARY,
+		.minlen = sizeof(struct ksmbd_quic_handshake_req),
+	},
+	[KSMBD_QUIC_ATTR_WRITE_HP] = {
+		.type = NLA_BINARY,
+		.minlen = KSMBD_QUIC_KEY_SIZE,
+		.maxlen = KSMBD_QUIC_KEY_SIZE,
+	},
+	[KSMBD_QUIC_ATTR_READ_HP] = {
+		.type = NLA_BINARY,
+		.minlen = KSMBD_QUIC_KEY_SIZE,
+		.maxlen = KSMBD_QUIC_KEY_SIZE,
+	},
+};
+
+static struct genl_cmd quic_genl_cmds[] = {
+	{
+		.c_id = KSMBD_QUIC_CMD_REGISTER,
+		.c_attr_policy = quic_nl_policy,
+		.c_msg_parser = &handle_unsupported_event,
+		.c_maxattr = KSMBD_QUIC_ATTR_MAX,
+	},
+	{
+		.c_id = KSMBD_QUIC_CMD_HANDSHAKE_REQ,
+		.c_attr_policy = quic_nl_policy,
+		.c_msg_parser = &handle_quic_handshake_req,
+		.c_maxattr = KSMBD_QUIC_ATTR_MAX,
+	},
+	{
+		.c_id = KSMBD_QUIC_CMD_HANDSHAKE_RSP,
+		.c_attr_policy = quic_nl_policy,
+		.c_msg_parser = &handle_unsupported_event,
+		.c_maxattr = KSMBD_QUIC_ATTR_MAX,
+	},
+};
+
+static struct genl_ops quic_family_ops = {
+	.o_name = KSMBD_QUIC_GENL_NAME,
+	.o_cmds = quic_genl_cmds,
+	.o_ncmds = ARRAY_SIZE(quic_genl_cmds),
+};
+
 int ipc_msg_send(struct ksmbd_ipc_msg *msg)
 {
 	struct nl_msg *nlmsg;
@@ -524,8 +692,53 @@ out_error:
 	return ret;
 }
 
+static int ipc_quic_register(void)
+{
+	struct nl_msg *nlmsg;
+	struct nlmsghdr *hdr;
+	int ret = -EINVAL;
+
+	nlmsg = nlmsg_alloc();
+	if (!nlmsg)
+		return -ENOMEM;
+
+	nlmsg_set_proto(nlmsg, NETLINK_GENERIC);
+	hdr = genlmsg_put(nlmsg, getpid(), 0, quic_family_ops.o_id, 0, 0,
+			  KSMBD_QUIC_CMD_REGISTER,
+			  KSMBD_QUIC_GENL_VERSION);
+	if (!hdr) {
+		pr_err("QUIC register genlmsg_put() failed\n");
+		goto out;
+	}
+
+	nl_complete_msg(quic_sk, nlmsg);
+	ret = nl_send_auto(quic_sk, nlmsg);
+	if (ret > 0)
+		ret = 0;
+	else
+		pr_err("QUIC register nl_send_auto() failed: %d\n", ret);
+
+out:
+	nlmsg_free(nlmsg);
+	return ret;
+}
+
 void ipc_destroy(void)
 {
+	if (quic_registered) {
+		switch (genl_register_family(&quic_family_ops)) {
+		case -NLE_EXIST:
+		case 0:
+			genl_unregister_family(&quic_family_ops);
+		}
+		quic_registered = false;
+	}
+
+	if (quic_sk) {
+		nl_socket_free(quic_sk);
+		quic_sk = NULL;
+	}
+
 	switch (genl_register_family(&ksmbd_family_ops)) {
 	case -NLE_EXIST:
 	case 0:
@@ -573,6 +786,62 @@ void ipc_init(void)
 	if (ret) {
 		pr_err("Can't resolve netlink family\n");
 		abort();
+	}
+
+	if (global_conf.quic_handshake_delegate && ksmbd_quic_tls_is_configured()) {
+		ret = ksmbd_quic_tls_init();
+		if (ret) {
+			pr_err("QUIC TLS backend init failed: %d\n", ret);
+			goto skip_quic;
+		}
+
+		quic_sk = nl_socket_alloc();
+		if (!quic_sk) {
+			pr_err("Can't allocate QUIC netlink socket\n");
+			abort();
+		}
+
+		nl_socket_disable_seq_check(quic_sk);
+		nl_socket_modify_cb(quic_sk, NL_CB_VALID, NL_CB_CUSTOM,
+				    quic_nlink_msg_cb, NULL);
+
+		ret = nl_connect(quic_sk, NETLINK_GENERIC);
+		if (ret) {
+			pr_err("Can't connect QUIC generic netlink: %s\n",
+			       nl_geterror(ret));
+			abort();
+		}
+
+		ret = nl_socket_set_buffer_size(quic_sk,
+						KSMBD_IPC_SO_RCVBUF_SIZE, 0);
+		if (ret) {
+			pr_err("Can't set QUIC netlink socket buffer size: %s\n",
+			       nl_geterror(ret));
+			abort();
+		}
+
+		if (genl_register_family(&quic_family_ops)) {
+			pr_err("Can't register QUIC netlink family client ops\n");
+			abort();
+		}
+		quic_registered = true;
+
+		ret = genl_ops_resolve(quic_sk, &quic_family_ops);
+		if (ret) {
+			pr_info("QUIC generic netlink family unavailable: %s\n",
+				nl_geterror(ret));
+		} else {
+			ret = ipc_quic_register();
+			if (ret)
+				pr_err("Can't send QUIC register message: %s\n",
+				       nl_geterror(ret));
+		}
+	} else {
+skip_quic:
+		if (global_conf.quic_handshake_delegate)
+			pr_info("QUIC handshake delegation requested but no usable TLS backend is configured\n");
+		else
+			pr_info("QUIC handshake delegation disabled; leaving kernel QUIC in proxy/stub mode\n");
 	}
 
 	if (ipc_ksmbd_starting_up()) {

@@ -786,10 +786,13 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 	}
 
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_STREAMS, &k, &v)) {
-		if (cp_get_group_kv_bool(v))
+		if (cp_get_group_kv_bool(v)) {
 			set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
-		else
+			clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS_DISABLED);
+		} else {
 			clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
+			set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS_DISABLED);
+		}
 	}
 
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_ACL_XATTR, &k, &v)) {

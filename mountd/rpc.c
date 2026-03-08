@@ -22,6 +22,9 @@
 static GHashTable	*pipes_table;
 static GRWLock		pipes_table_lock;
 
+#define FILE_PIPE_CONNECTED_STATE	3
+#define PIPE_PEEK_SCRATCH_SZ		(4 * 1024 * 1024)
+
 /*
  * Version 2.0 data representation protocol
  *
@@ -156,6 +159,7 @@ void rpc_pipe_reset(struct ksmbd_rpc_pipe *pipe)
 			pipe->entry_processed(pipe, 0);
 	}
 	pipe->num_entries = 0;
+	pipe->ioctl_reply_consumed = false;
 }
 
 static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
@@ -1318,15 +1322,121 @@ int rpc_ioctl_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp,
 		      int max_resp_sz)
 {
+	struct ksmbd_rpc_pipe *pipe;
 	int ret;
 
 	if (req->payload_sz < sizeof(struct dcerpc_header))
 		return KSMBD_RPC_EBAD_DATA;
 
+	pipe = rpc_pipe_lookup(req->handle);
+	if (!pipe || !pipe->dce)
+		return KSMBD_RPC_EBAD_FID;
+
 	ret = rpc_write_request(req, resp);
-	if (ret == KSMBD_RPC_OK)
-		return rpc_read_request(req, resp, max_resp_sz);
+	if (ret == KSMBD_RPC_OK) {
+		ret = rpc_read_request(req, resp, max_resp_sz);
+		if (ret == KSMBD_RPC_OK) {
+			/*
+			 * FSCTL_NAMED_PIPE_READ_WRITE delivers the current
+			 * response inline. Do not let a later READ regenerate
+			 * that same reply on the same pipe handle.
+			 */
+			pipe->ioctl_reply_consumed = true;
+			pipe->dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
+		}
+		return ret;
+	}
 	return ret;
+}
+
+static int rpc_pending_response_len(struct ksmbd_rpc_pipe *pipe, __u32 *length)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct ksmbd_dcerpc saved_dce;
+	struct ksmbd_rpc_pipe saved_pipe;
+	struct ksmbd_rpc_command *tmp_resp;
+	int ret = KSMBD_RPC_OK;
+
+	*length = 0;
+	if (!(dce->flags & KSMBD_DCERPC_RETURN_READY))
+		return KSMBD_RPC_OK;
+
+	tmp_resp = g_try_malloc0(sizeof(*tmp_resp) + PIPE_PEEK_SCRATCH_SZ);
+	if (!tmp_resp)
+		return KSMBD_RPC_ENOMEM;
+
+	saved_dce = *dce;
+	saved_pipe = *pipe;
+	pipe->entry_processed = NULL;
+	dcerpc_set_ext_payload(dce, tmp_resp->payload, PIPE_PEEK_SCRATCH_SZ);
+	dce->rpc_resp = tmp_resp;
+
+	if (dce->hdr.ptype == DCERPC_PTYPE_RPC_BIND ||
+	    dce->hdr.ptype == DCERPC_PTYPE_RPC_ALTCONT) {
+		ret = dcerpc_bind_return(pipe);
+	} else if (dce->hdr.ptype == DCERPC_PTYPE_RPC_REQUEST) {
+		if (dce->rpc_req->flags & KSMBD_RPC_SRVSVC_METHOD_INVOKE)
+			ret = rpc_srvsvc_read_request(pipe, tmp_resp,
+						      PIPE_PEEK_SCRATCH_SZ);
+		else if (dce->rpc_req->flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE)
+			ret = rpc_wkssvc_read_request(pipe, tmp_resp,
+						      PIPE_PEEK_SCRATCH_SZ);
+		else if (dce->rpc_req->flags & KSMBD_RPC_SAMR_METHOD_INVOKE)
+			ret = rpc_samr_read_request(pipe, tmp_resp,
+						    PIPE_PEEK_SCRATCH_SZ);
+		else if (dce->rpc_req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
+			ret = rpc_lsarpc_read_request(pipe, tmp_resp,
+						      PIPE_PEEK_SCRATCH_SZ);
+		else
+			ret = KSMBD_RPC_ENOTIMPLEMENTED;
+	} else {
+		ret = KSMBD_RPC_ENOTIMPLEMENTED;
+	}
+
+	if (ret == KSMBD_RPC_OK)
+		*length = tmp_resp->payload_sz;
+
+	*dce = saved_dce;
+	*pipe = saved_pipe;
+	g_free(tmp_resp);
+	return ret;
+}
+
+int rpc_state_request(struct ksmbd_rpc_command *req,
+		      struct ksmbd_rpc_command *resp,
+		      int max_resp_sz)
+{
+	struct ksmbd_rpc_pipe *pipe;
+	struct ksmbd_rpc_pipe_info *info;
+	__u32 message_length;
+	int ret;
+
+	if (max_resp_sz < sizeof(struct ksmbd_rpc_command) + sizeof(*info))
+		return KSMBD_RPC_EMORE_DATA;
+
+	pipe = rpc_pipe_lookup(req->handle);
+	if (!pipe || !pipe->dce) {
+		pr_err("RPC: no pipe or pipe has no associated DCE [%d]\n",
+		       req->handle);
+		return KSMBD_RPC_EBAD_FID;
+	}
+
+	info = (struct ksmbd_rpc_pipe_info *)resp->payload;
+	memset(info, 0, sizeof(*info));
+	info->pipe_state = FILE_PIPE_CONNECTED_STATE;
+	resp->payload_sz = sizeof(*info);
+
+	if (!(pipe->dce->flags & KSMBD_DCERPC_RETURN_READY))
+		return KSMBD_RPC_OK;
+
+	info->number_of_messages = 1;
+	ret = rpc_pending_response_len(pipe, &message_length);
+	if (ret != KSMBD_RPC_OK)
+		return ret;
+
+	info->message_length = message_length;
+	info->read_data_available = message_length;
+	return KSMBD_RPC_OK;
 }
 
 int rpc_read_request(struct ksmbd_rpc_command *req,
@@ -1345,6 +1455,14 @@ int rpc_read_request(struct ksmbd_rpc_command *req,
 	}
 
 	dce = pipe->dce;
+	if (pipe->ioctl_reply_consumed) {
+		dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
+		return KSMBD_RPC_OK;
+	}
+
+	if (!(dce->flags & KSMBD_DCERPC_RETURN_READY))
+		return KSMBD_RPC_OK;
+
 	dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
 	dce->rpc_req = req;
 	dce->rpc_resp = resp;
@@ -1392,6 +1510,7 @@ int rpc_write_request(struct ksmbd_rpc_command *req,
 	dce->rpc_req = req;
 	dce->rpc_resp = resp;
 	dcerpc_set_ext_payload(dce, req->payload, req->payload_sz);
+	pipe->ioctl_reply_consumed = false;
 	dce->flags |= KSMBD_DCERPC_RETURN_READY;
 
 	if (dcerpc_hdr_read(dce, &dce->hdr))

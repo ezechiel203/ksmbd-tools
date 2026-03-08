@@ -433,6 +433,7 @@ int usm_handle_login_request(struct ksmbd_login_request *req,
 {
 	struct ksmbd_user *user = NULL;
 	int null_session = 0;
+	bool ignore_map_to_guest;
 
 	if (!usm_is_valid_ipc_account(req->account)) {
 		pr_err("Invalid login request: account is not NUL-terminated\n");
@@ -442,6 +443,8 @@ int usm_handle_login_request(struct ksmbd_login_request *req,
 
 	if (req->account[0] == '\0')
 		null_session = 1;
+	ignore_map_to_guest =
+		req->flags & KSMBD_LOGIN_FLAG_IGNORE_MAP_TO_GUEST;
 
 	if (!null_session)
 		user = usm_lookup_user((char *)req->account);
@@ -453,7 +456,8 @@ int usm_handle_login_request(struct ksmbd_login_request *req,
 
 	resp->status = KSMBD_USER_FLAG_BAD_USER;
 	if (!null_session &&
-		global_conf.map_to_guest == KSMBD_CONF_MAP_TO_GUEST_NEVER)
+	    (ignore_map_to_guest ||
+	     global_conf.map_to_guest == KSMBD_CONF_MAP_TO_GUEST_NEVER))
 		return 0;
 
 	if (null_session ||

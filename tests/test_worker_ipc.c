@@ -739,6 +739,7 @@ static void test_rpc_method_flag_constants(void)
 	assert(KSMBD_RPC_OPEN_METHOD == BIT(4));
 	assert(KSMBD_RPC_WRITE_METHOD == BIT(5));
 	assert(KSMBD_RPC_CLOSE_METHOD == BIT(7));
+	assert(KSMBD_RPC_QUERY_METHOD == (BIT(12) | KSMBD_RPC_METHOD_RETURN));
 
 	/* IOCTL should include METHOD_RETURN */
 	assert((KSMBD_RPC_IOCTL_METHOD & KSMBD_RPC_METHOD_RETURN) != 0);
@@ -748,6 +749,9 @@ static void test_rpc_method_flag_constants(void)
 
 	/* RAP should include METHOD_RETURN */
 	assert((KSMBD_RPC_RAP_METHOD & KSMBD_RPC_METHOD_RETURN) != 0);
+
+	/* QUERY should include METHOD_RETURN */
+	assert((KSMBD_RPC_QUERY_METHOD & KSMBD_RPC_METHOD_RETURN) != 0);
 }
 
 static void test_rpc_status_constants(void)

@@ -668,6 +668,15 @@ static int process_global_conf_kv(GHashTable *kv)
 	if (group_kv_steal(kv, "quic send timeout", &k, &v))
 		global_conf.quic_send_timeout = cp_get_group_kv_long(v);
 
+	if (group_kv_steal(kv, "quic handshake delegate", &k, &v))
+		global_conf.quic_handshake_delegate = cp_get_group_kv_bool(v);
+
+	if (group_kv_steal(kv, "quic tls cert", &k, &v))
+		global_conf.quic_tls_cert = cp_get_group_kv_string(v);
+
+	if (group_kv_steal(kv, "quic tls key", &k, &v))
+		global_conf.quic_tls_key = cp_get_group_kv_string(v);
+
 	if (group_kv_steal(kv, "max lock count", &k, &v))
 		global_conf.max_lock_count = cp_get_group_kv_long(v);
 

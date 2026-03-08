@@ -149,8 +149,11 @@ struct ksmbd_shutdown_request {
 struct ksmbd_login_request {
 	__u32	handle;
 	__s8	account[KSMBD_REQ_MAX_ACCOUNT_NAME_SZ]; /* user account name */
-	__u32	reserved[16];				/* Reserved room */
+	__u32	flags;					/* KSMBD_LOGIN_FLAG_* */
+	__u32	reserved[15];				/* Reserved room */
 };
+
+#define KSMBD_LOGIN_FLAG_IGNORE_MAP_TO_GUEST	BIT(0)
 
 /*
  * IPC user login response.
@@ -268,10 +271,18 @@ struct ksmbd_logout_request {
  */
 struct ksmbd_rpc_command {
 	__u32	handle;
+	__u32	xid;
 	__u32	flags;
 	__u32	payload_sz;
 	__u8	payload[];
 };
+
+struct ksmbd_rpc_pipe_info {
+	__u32	pipe_state;
+	__u32	read_data_available;
+	__u32	number_of_messages;
+	__u32	message_length;
+} __packed;
 
 /*
  * IPC Request Kerberos authentication
@@ -417,6 +428,7 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_SHARE_FLAG_CACHING_VDO			BIT(22)
 #define KSMBD_SHARE_FLAG_CACHING_NONE			(BIT(21) | BIT(22))
 #define KSMBD_SHARE_FLAG_CACHING_MASK			(BIT(21) | BIT(22))
+#define KSMBD_SHARE_FLAG_STREAMS_DISABLED		BIT(23)
 
 /*
  * Tree connect request flags.
@@ -453,6 +465,7 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_RPC_SAMR_METHOD_RETURN	(KSMBD_RPC_SAMR_METHOD_INVOKE | KSMBD_RPC_METHOD_RETURN)
 #define KSMBD_RPC_LSARPC_METHOD_INVOKE	BIT(11)
 #define KSMBD_RPC_LSARPC_METHOD_RETURN	(KSMBD_RPC_LSARPC_METHOD_INVOKE | KSMBD_RPC_METHOD_RETURN)
+#define KSMBD_RPC_QUERY_METHOD		(BIT(12) | KSMBD_RPC_METHOD_RETURN)
 
 /*
  * RPC status definitions.
